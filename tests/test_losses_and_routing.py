@@ -4,6 +4,7 @@ from titans.losses import (
     class_specific_targets,
     margin,
     margin_targets,
+    oracle_class_targets,
     smoothed_labels,
 )
 from titans.route import cascade_predictions, class_delegation, margin_delegation
@@ -14,6 +15,13 @@ def test_class_specific_targets_match_equation_four():
     labels = torch.tensor([0, 2])
     targets = class_specific_targets(teacher, labels, torch.tensor([True, False]), alpha=0.6)
     assert torch.allclose(targets.sum(-1), torch.ones(2))
+    assert torch.allclose(targets[1], smoothed_labels(labels[1:], 3, 0.6)[0])
+
+
+def test_oracle_class_targets_only_smooth_out_of_domain_labels():
+    labels = torch.tensor([0, 2])
+    targets = oracle_class_targets(labels, torch.tensor([True, False]), 3, alpha=0.6)
+    assert torch.equal(targets[0], torch.tensor([1.0, 0.0, 0.0]))
     assert torch.allclose(targets[1], smoothed_labels(labels[1:], 3, 0.6)[0])
 
 

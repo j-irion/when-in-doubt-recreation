@@ -1,4 +1,4 @@
-"""Straightforward student training against frozen teacher scores."""
+"""Student training for the paper's ImageNet experiments."""
 
 import torch
 from torch import nn
@@ -8,16 +8,16 @@ from .losses import (
     class_specific_targets,
     distillation_loss,
     margin_targets,
+    oracle_class_targets,
     standard_targets,
 )
 from .models import logits
 
 
 def train(
-    task: str,
     student: nn.Module,
     loader: torch.utils.data.DataLoader,
-    teacher_logits: torch.Tensor,
+    teacher_logits: torch.Tensor | None,
     device: torch.device,
     method: str,
     epochs: int,
@@ -25,29 +25,32 @@ def train(
     alpha: float,
     rho_train: float,
     in_domain_classes: torch.Tensor,
+    classes: int,
 ) -> list[float]:
-    """Train with one of the paper's classification targets; cache order matches loader order."""
+    """Train against L2 scores, or the paper's ImageNet-21k true-label oracle."""
+    if teacher_logits is None and method == "margin":
+        raise ValueError("margin distillation needs EfficientNet logits; ImageNet-21k uses class distillation with an oracle")
     student.train()
     optimizer = torch.optim.AdamW(student.parameters(), lr=learning_rate)
     losses: list[float] = []
     for _ in range(epochs):
-        offset = 0
-        total = 0.0
+        offset = total = 0
         for batch in loader:
             inputs, labels = split_batch(batch, "student", device)
-            batch_teacher = teacher_logits[offset : offset + len(labels)].to(device)
-            offset += len(labels)
-            if method == "baseline":
-                targets = standard_targets(batch_teacher)
-            elif method == "class":
-                in_domain = torch.isin(labels, in_domain_classes.to(device))
-                targets = class_specific_targets(batch_teacher, labels, in_domain, alpha)
-            elif method == "margin":
-                targets, _ = margin_targets(batch_teacher, labels, rho_train, alpha)
+            in_domain = torch.isin(labels, in_domain_classes.to(device))
+            if teacher_logits is None:
+                targets = oracle_class_targets(labels, in_domain, classes, alpha) if method == "class" else torch.nn.functional.one_hot(labels, classes).float()
             else:
-                raise ValueError(f"unknown method: {method}")
+                teacher = teacher_logits[offset : offset + len(labels)].to(device)
+                if method == "baseline":
+                    targets = standard_targets(teacher)
+                elif method == "class":
+                    targets = class_specific_targets(teacher, labels, in_domain, alpha)
+                else:
+                    targets, _ = margin_targets(teacher, labels, rho_train, alpha)
+            offset += len(labels)
             optimizer.zero_grad()
-            loss = distillation_loss(logits(task, student, inputs), targets)
+            loss = distillation_loss(logits(student, inputs), targets)
             loss.backward()
             optimizer.step()
             total += loss.item() * len(labels)

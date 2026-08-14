@@ -32,6 +32,15 @@ def class_specific_targets(
     return torch.where(in_domain[:, None], teacher, fallback)
 
 
+def oracle_class_targets(labels: torch.Tensor, in_domain: torch.Tensor, classes: int, alpha: float) -> torch.Tensor:
+    """Class-specific targets when the teacher is the true-label oracle (ImageNet-21k)."""
+    return torch.where(
+        in_domain[:, None],
+        smoothed_labels(labels, classes, 0.0),
+        smoothed_labels(labels, classes, alpha),
+    )
+
+
 def margin(teacher_logits: torch.Tensor, temperature: float = 1.0) -> torch.Tensor:
     """Top-1 minus top-2 softmax probability (equation 6)."""
     top_two = probabilities(teacher_logits, temperature).topk(2, dim=-1).values
