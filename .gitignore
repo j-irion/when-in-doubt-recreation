@@ -1,11 +1,6 @@
 .venv/
 __pycache__/
-.pytest_cache/
-.ruff_cache/
 data/
 artifacts/
 *.pyc
-
-PLAN.md
 2110.10305v1.md
-README.md
