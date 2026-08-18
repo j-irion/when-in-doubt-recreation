@@ -1,5 +1,3 @@
-"""A first ImageNet-1k two-stage distillation experiment."""
-
 import json
 from pathlib import Path
 
@@ -8,21 +6,33 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from torchvision.datasets import ImageFolder
 from torchvision.datasets.folder import default_loader
-from torchvision.transforms import CenterCrop, Compose, Normalize, RandomHorizontalFlip, RandomResizedCrop, Resize, ToTensor
-
+from torchvision.transforms import (
+    CenterCrop,
+    Compose,
+    Normalize,
+    RandomHorizontalFlip,
+    RandomResizedCrop,
+    Resize,
+    ToTensor,
+)
 
 DATA = Path("/workspace/julius/data/imagenet1k")
 OUTPUT = Path("artifacts/imagenet1k")
-METHOD = "class"  # "baseline", "class", or "margin"
+METHOD = "class"  # "baseline", "class", "margin"
+
+# reported by paper
 ALPHA = 0.6
-RHO_TRAIN = 0.8
-IN_DOMAIN = set(range(300))
 STUDENT_WIDTH = 0.75
+IN_DOMAIN = set(range(300))  # 300 is reported, but not which 300
+
+# not reported by paper
+RHO_TRAIN = 0.8
 TEACHER_BATCH_SIZE = 32
 STUDENT_BATCH_SIZE = 256
 WORKERS = 8
 EPOCHS = 90
 LEARNING_RATE = 1e-3
+
 DEVICE = "cuda"
 
 
@@ -74,14 +84,22 @@ if not torch.cuda.is_available():
 
 torch.backends.cudnn.benchmark = True
 OUTPUT.mkdir(parents=True, exist_ok=True)
-teacher_train_loader = loader(Images(DATA / "train", train=False, teacher=True), TEACHER_BATCH_SIZE)
-teacher_val_loader = loader(Images(DATA / "val", train=False, teacher=True), TEACHER_BATCH_SIZE)
+teacher_train_loader = loader(
+    Images(DATA / "train", train=False, teacher=True), TEACHER_BATCH_SIZE
+)
+teacher_val_loader = loader(
+    Images(DATA / "val", train=False, teacher=True), TEACHER_BATCH_SIZE
+)
 student_train_data = Images(DATA / "train", train=True, teacher=False)
 student_val_data = Images(DATA / "val", train=False, teacher=False)
 student_train_loader = loader(student_train_data, STUDENT_BATCH_SIZE)
 student_val_loader = loader(student_val_data, STUDENT_BATCH_SIZE)
 
-teacher = timm.create_model("tf_efficientnet_l2.ns_jft_in1k_475", pretrained=True).to(DEVICE).eval()
+teacher = (
+    timm.create_model("tf_efficientnet_l2.ns_jft_in1k_475", pretrained=True)
+    .to(DEVICE)
+    .eval()
+)
 student_name = f"mobilenetv3_large_{int(STUDENT_WIDTH * 100):03d}"
 student = timm.create_model(student_name, pretrained=False, num_classes=1000).to(DEVICE)
 
@@ -104,7 +122,7 @@ def cached_logits(data_loader, name):
 
 teacher_train = cached_logits(teacher_train_loader, "teacher_train.pt")
 teacher_val = cached_logits(teacher_val_loader, "teacher_val.pt")
-optimizer = torch.optim.AdamW(student.parameters(), lr=LEARNING_RATE)
+optimizer = torch.optim.AdamW(student.parameters(), lr=LEARNING_RATE) # not specified in the paper
 in_domain = torch.tensor(sorted(IN_DOMAIN), device=DEVICE)
 
 for epoch in range(EPOCHS):
@@ -122,23 +140,35 @@ for epoch in range(EPOCHS):
         elif METHOD == "class":
             targets = teacher_probs.clone()
             hard = ~torch.isin(labels, in_domain)
-            targets[hard] = (1 - ALPHA) * torch.nn.functional.one_hot(labels[hard], 1000) + ALPHA / 1000
+            targets[hard] = (1 - ALPHA) * torch.nn.functional.one_hot(
+                labels[hard], 1000
+            ) + ALPHA / 1000
         elif METHOD == "margin":
             top_two = teacher_probs.topk(2, dim=1).values
             hard = top_two[:, 0] - top_two[:, 1] <= RHO_TRAIN
             targets = teacher_probs.clone()
-            targets[hard] = (1 - ALPHA) * torch.nn.functional.one_hot(labels[hard], 1000) + ALPHA / 1000
+            targets[hard] = (1 - ALPHA) * torch.nn.functional.one_hot(
+                labels[hard], 1000
+            ) + ALPHA / 1000
         else:
             raise ValueError("METHOD must be baseline, class, or margin")
 
         optimizer.zero_grad()
-        loss = -(targets * torch.log_softmax(student(images.to(DEVICE)), dim=1)).sum(dim=1).mean()
+        loss = (
+            -(targets * torch.log_softmax(student(images.to(DEVICE)), dim=1))
+            .sum(dim=1)
+            .mean()
+        )
         loss.backward()
         optimizer.step()
         total_loss += loss.item() * len(labels)
         if batch % 100 == 0 or batch == len(student_train_loader):
-            print(f"epoch {epoch + 1}/{EPOCHS}: {batch}/{len(student_train_loader)} batches")
-    print(f"epoch {epoch + 1}/{EPOCHS}: loss={total_loss / len(student_train_data):.4f}")
+            print(
+                f"epoch {epoch + 1}/{EPOCHS}: {batch}/{len(student_train_loader)} batches"
+            )
+    print(
+        f"epoch {epoch + 1}/{EPOCHS}: loss={total_loss / len(student_train_data):.4f}"
+    )
 
 torch.save(student.state_dict(), OUTPUT / "student.pt")
 student.eval()
@@ -158,7 +188,9 @@ top_two = student_probs.topk(2, dim=1).values
 margin = top_two[:, 0] - top_two[:, 1]
 for rho in range(101):
     keep_student = margin >= rho / 100
-    prediction = torch.where(keep_student, student_scores.argmax(1), teacher_val.argmax(1))
+    prediction = torch.where(
+        keep_student, student_scores.argmax(1), teacher_val.argmax(1)
+    )
     results.append(
         {
             "rho": rho / 100,
