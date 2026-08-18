@@ -30,7 +30,7 @@ RHO_TRAIN = 0.8
 TEACHER_BATCH_SIZE = 32
 STUDENT_BATCH_SIZE = 256
 WORKERS = 8
-EPOCHS = 90
+EPOCHS = 30
 LEARNING_RATE = 1e-3
 
 DEVICE = "cuda"
@@ -122,7 +122,9 @@ def cached_logits(data_loader, name):
 
 teacher_train = cached_logits(teacher_train_loader, "teacher_train.pt")
 teacher_val = cached_logits(teacher_val_loader, "teacher_val.pt")
-optimizer = torch.optim.AdamW(student.parameters(), lr=LEARNING_RATE) # not specified in the paper
+optimizer = torch.optim.AdamW(
+    student.parameters(), lr=LEARNING_RATE
+)  # not specified in the paper
 in_domain = torch.tensor(sorted(IN_DOMAIN), device=DEVICE)
 
 for epoch in range(EPOCHS):
