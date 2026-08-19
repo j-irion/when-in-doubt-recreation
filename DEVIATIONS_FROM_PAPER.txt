@@ -95,9 +95,9 @@ Training differences
 Evaluation differences
 ----------------------
 
-- The script evaluates only top-1 accuracy, the fraction handled by the student, and a student-margin routing curve on the ILSVRC-2012 validation set.
+- The final reporting block in imagenet1k.py logs overall accuracy, in-domain accuracy, overall/in-domain student fraction, class-based delegation, margin-based delegation, and a local batch-1 GPU-forward latency estimate. This is a reporting addition, not part of the authors' released protocol.
 
-- The paper separately reports overall accuracy, in-domain accuracy, inference latency, and latency-versus-accuracy trade-offs. The script does not measure in-domain accuracy or latency.
+- The local latency estimate excludes image preprocessing, loading, cache access, routing, and remote-teacher transport. It is not comparable to the paper's latency measurement.
 
 - The script sweeps routing thresholds from 0.00 through 1.00 in 0.01 increments. This grid is an implementation choice; the paper does not state its threshold grid.
 

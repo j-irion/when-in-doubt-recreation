@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 
 import timm
@@ -179,24 +180,68 @@ with torch.inference_mode():
         labels.append(batch_labels)
 student_scores = torch.cat(student_scores)
 labels = torch.cat(labels)
-print("teacher accuracy:", (teacher_val.argmax(1) == labels).float().mean().item())
-print("student accuracy:", (student_scores.argmax(1) == labels).float().mean().item())
+teacher_prediction = teacher_val.argmax(1)
+student_prediction = student_scores.argmax(1)
+in_domain_cpu = in_domain.cpu()
 
-results = []
+
+def metric(prediction, keep_student):
+    rows = torch.isin(labels, in_domain_cpu)
+    return {
+        "overall_accuracy": (prediction == labels).float().mean().item(),
+        "overall_student_fraction": keep_student.float().mean().item(),
+        "in_domain_accuracy": (prediction[rows] == labels[rows]).float().mean().item(),
+        "in_domain_student_fraction": keep_student[rows].float().mean().item(),
+    }
+
+
+def latency_ms(model, size):
+    images = torch.randn(1, 3, size, size, device=DEVICE)
+    with torch.inference_mode():
+        for _ in range(10):
+            model(images)
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+        for _ in range(50):
+            model(images)
+        torch.cuda.synchronize()
+    return (time.perf_counter() - start) * 1000 / 50
+
+
+student_ms = latency_ms(student, 224)
+teacher_ms = latency_ms(teacher, 475)
+metrics = {
+    "run": {
+        "gpu": torch.cuda.get_device_name(0),
+        "student_width": STUDENT_WIDTH,
+        "in_domain_class_ids": sorted(IN_DOMAIN),
+        "student_forward_ms_batch_1": student_ms,
+        "teacher_forward_ms_batch_1": teacher_ms,
+        "latency_note": "Warm GPU forward-pass time only; excludes image loading, preprocessing, routing, and remote-teacher transport.",
+    },
+    "teacher_only": metric(teacher_prediction, torch.zeros_like(labels, dtype=torch.bool)),
+    "student_only": metric(student_prediction, torch.ones_like(labels, dtype=torch.bool)),
+    "margin_delegation": [],
+}
+metrics["teacher_only"]["expected_cascade_forward_ms"] = teacher_ms
+metrics["student_only"]["expected_cascade_forward_ms"] = student_ms
+
+class_keep = torch.isin(student_prediction, in_domain_cpu)
+class_prediction = torch.where(class_keep, student_prediction, teacher_prediction)
+metrics["class_delegation"] = metric(class_prediction, class_keep)
+metrics["class_delegation"]["expected_cascade_forward_ms"] = student_ms + (1 - metrics["class_delegation"]["overall_student_fraction"]) * teacher_ms
+
 student_probs = torch.softmax(student_scores, dim=1)
 top_two = student_probs.topk(2, dim=1).values
 margin = top_two[:, 0] - top_two[:, 1]
 for rho in range(101):
     keep_student = margin >= rho / 100
-    prediction = torch.where(
-        keep_student, student_scores.argmax(1), teacher_val.argmax(1)
-    )
-    results.append(
-        {
-            "rho": rho / 100,
-            "accuracy": (prediction == labels).float().mean().item(),
-            "student_fraction": keep_student.float().mean().item(),
-        }
-    )
-with (OUTPUT / "results.json").open("w") as file:
-    json.dump(results, file, indent=2)
+    prediction = torch.where(keep_student, student_prediction, teacher_prediction)
+    row = {"rho": rho / 100, **metric(prediction, keep_student)}
+    row["expected_cascade_forward_ms"] = student_ms + (1 - row["overall_student_fraction"]) * teacher_ms
+    metrics["margin_delegation"].append(row)
+
+with (OUTPUT / "metrics.json").open("w") as file:
+    json.dump(metrics, file, indent=2)
+print(json.dumps({name: value for name, value in metrics.items() if name != "margin_delegation"}, indent=2))
+print(f"wrote {OUTPUT / 'metrics.json'}")
