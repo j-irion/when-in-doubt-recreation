@@ -95,7 +95,7 @@ Training differences
 Evaluation differences
 ----------------------
 
-- The final reporting block in imagenet1k.py logs overall accuracy, in-domain accuracy, overall/in-domain student fraction, class-based delegation, margin-based delegation, and a local batch-1 GPU-forward latency estimate. This is a reporting addition, not part of the authors' released protocol.
+- The final reporting block in imagenet1k.py logs overall accuracy, in-domain accuracy, overall/in-domain student fraction, class-based delegation, margin-based delegation, per-class accuracy, per-class minimum/maximum summaries, and a local batch-1 GPU-forward latency estimate. This is a reporting addition, not part of the authors' released protocol.
 
 - The local latency estimate excludes image preprocessing, loading, cache access, routing, and remote-teacher transport. It is not comparable to the paper's latency measurement.
 

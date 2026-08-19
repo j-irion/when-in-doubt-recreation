@@ -39,7 +39,9 @@ DEVICE = "cuda"
 
 class Images(Dataset):
     def __init__(self, directory: Path, train: bool, teacher: bool):
-        self.images = ImageFolder(directory).samples
+        folder = ImageFolder(directory)
+        self.images = folder.samples
+        self.classes = folder.classes
         if teacher:
             self.transform = Compose(
                 [
@@ -231,6 +233,42 @@ class_prediction = torch.where(class_keep, student_prediction, teacher_predictio
 metrics["class_delegation"] = metric(class_prediction, class_keep)
 metrics["class_delegation"]["expected_cascade_forward_ms"] = student_ms + (1 - metrics["class_delegation"]["overall_student_fraction"]) * teacher_ms
 
+per_class = []
+for class_id, synset in enumerate(student_val_data.classes):
+    rows = labels == class_id
+    per_class.append(
+        {
+            "class_id": class_id,
+            "synset": synset,
+            "in_domain": class_id in IN_DOMAIN,
+            "samples": rows.sum().item(),
+            "teacher_accuracy": (teacher_prediction[rows] == labels[rows]).float().mean().item(),
+            "student_accuracy": (student_prediction[rows] == labels[rows]).float().mean().item(),
+            "class_delegation_accuracy": (class_prediction[rows] == labels[rows]).float().mean().item(),
+            "class_delegation_student_fraction": class_keep[rows].float().mean().item(),
+        }
+    )
+
+
+def min_max(rows, key):
+    low = min(rows, key=lambda row: row[key])
+    high = max(rows, key=lambda row: row[key])
+    return {
+        "min": {"class_id": low["class_id"], "synset": low["synset"], "accuracy": low[key]},
+        "max": {"class_id": high["class_id"], "synset": high["synset"], "accuracy": high[key]},
+    }
+
+
+in_domain_classes = [row for row in per_class if row["in_domain"]]
+metrics["per_class"] = per_class
+metrics["per_class_min_max"] = {
+    "teacher": min_max(per_class, "teacher_accuracy"),
+    "student": min_max(per_class, "student_accuracy"),
+    "class_delegation": min_max(per_class, "class_delegation_accuracy"),
+    "in_domain_student": min_max(in_domain_classes, "student_accuracy"),
+    "in_domain_class_delegation": min_max(in_domain_classes, "class_delegation_accuracy"),
+}
+
 student_probs = torch.softmax(student_scores, dim=1)
 top_two = student_probs.topk(2, dim=1).values
 margin = top_two[:, 0] - top_two[:, 1]
@@ -243,5 +281,6 @@ for rho in range(101):
 
 with (OUTPUT / "metrics.json").open("w") as file:
     json.dump(metrics, file, indent=2)
-print(json.dumps({name: value for name, value in metrics.items() if name != "margin_delegation"}, indent=2))
+print(json.dumps(metrics["per_class_min_max"], indent=2))
+print(json.dumps({name: value for name, value in metrics.items() if name not in {"margin_delegation", "per_class"}}, indent=2))
 print(f"wrote {OUTPUT / 'metrics.json'}")
