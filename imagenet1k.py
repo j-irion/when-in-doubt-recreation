@@ -63,14 +63,14 @@ class Images(Dataset):
 
     def __getitem__(self, index):
         path, label = self.images[index]
-        return self.transform(default_loader(path)), label
+        return self.transform(default_loader(path)), label, index
 
 
-def loader(images, batch_size):
+def loader(images, batch_size, shuffle=False):
     return DataLoader(
         images,
         batch_size,
-        shuffle=False,
+        shuffle=shuffle,
         num_workers=WORKERS,
         pin_memory=True,
         persistent_workers=WORKERS > 0,
@@ -92,7 +92,7 @@ teacher_val_loader = loader(
 )
 student_train_data = Images(DATA / "train", train=True, teacher=False)
 student_val_data = Images(DATA / "val", train=False, teacher=False)
-student_train_loader = loader(student_train_data, STUDENT_BATCH_SIZE)
+student_train_loader = loader(student_train_data, STUDENT_BATCH_SIZE, shuffle=True)
 student_val_loader = loader(student_val_data, STUDENT_BATCH_SIZE)
 
 teacher = (
@@ -111,7 +111,7 @@ def cached_logits(data_loader, name):
         return torch.load(path, map_location="cpu", weights_only=True)
     scores = []
     with torch.inference_mode():
-        for batch, (images, _) in enumerate(data_loader, 1):
+        for batch, (images, _, _) in enumerate(data_loader, 1):
             scores.append(teacher(images.to(DEVICE)).cpu())
             if batch % 100 == 0 or batch == len(data_loader):
                 print(f"{name}: {batch}/{len(data_loader)} batches")
@@ -130,11 +130,9 @@ in_domain = torch.tensor(sorted(IN_DOMAIN), device=DEVICE)
 for epoch in range(EPOCHS):
     student.train()
     total_loss = 0.0
-    offset = 0
-    for batch, (images, labels) in enumerate(student_train_loader, 1):
+    for batch, (images, labels, indices) in enumerate(student_train_loader, 1):
         labels = labels.to(DEVICE)
-        teacher_scores = teacher_train[offset : offset + len(labels)].to(DEVICE)
-        offset += len(labels)
+        teacher_scores = teacher_train[indices].to(DEVICE)
         teacher_probs = torch.softmax(teacher_scores, dim=1)
 
         if METHOD == "baseline":
@@ -176,7 +174,7 @@ torch.save(student.state_dict(), OUTPUT / "student.pt")
 student.eval()
 student_scores, labels = [], []
 with torch.inference_mode():
-    for images, batch_labels in student_val_loader:
+    for images, batch_labels, _ in student_val_loader:
         student_scores.append(student(images.to(DEVICE)).cpu())
         labels.append(batch_labels)
 student_scores = torch.cat(student_scores)
