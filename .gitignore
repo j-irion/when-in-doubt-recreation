@@ -2,8 +2,8 @@
 __pycache__/
 data/
 artifacts/
-metrics.json
-plots/
+metrics*.json
+plots*/
 *.pyc
 2110.10305v1.md
 plot_metrics.py

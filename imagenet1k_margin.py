@@ -25,6 +25,7 @@ METHOD = "margin"  # "baseline", "class", "margin"
 ALPHA = 0.6
 STUDENT_WIDTH = 0.75
 IN_DOMAIN = set(range(300))  # 300 is reported, but not which 300
+MARGIN_IN_DOMAIN = 0.4
 
 # not reported by paper
 RHO_TRAIN = 0.8
@@ -184,11 +185,23 @@ student_scores = torch.cat(student_scores)
 labels = torch.cat(labels)
 teacher_prediction = teacher_val.argmax(1)
 student_prediction = student_scores.argmax(1)
-in_domain_cpu = in_domain.cpu()
+student_probs = torch.softmax(student_scores, dim=1)
+top_two = student_probs.topk(2, dim=1).values
+margin = top_two[:, 0] - top_two[:, 1]
+in_domain_rows = (
+    margin >= MARGIN_IN_DOMAIN
+    if METHOD == "margin"
+    else torch.isin(labels, in_domain.cpu())
+)
+in_domain_definition = (
+    f"student margin >= {MARGIN_IN_DOMAIN}"
+    if METHOD == "margin"
+    else "true label in configured class IDs"
+)
 
 
 def metric(prediction, keep_student):
-    rows = torch.isin(labels, in_domain_cpu)
+    rows = in_domain_rows
     return {
         "overall_accuracy": (prediction == labels).float().mean().item(),
         "overall_student_fraction": keep_student.float().mean().item(),
@@ -216,71 +229,120 @@ metrics = {
     "run": {
         "gpu": torch.cuda.get_device_name(0),
         "student_width": STUDENT_WIDTH,
-        "in_domain_class_ids": sorted(IN_DOMAIN),
+        "method": METHOD,
+        "in_domain_definition": in_domain_definition,
+        "in_domain_class_ids": sorted(IN_DOMAIN) if METHOD != "margin" else None,
+        "margin_in_domain_threshold": MARGIN_IN_DOMAIN if METHOD == "margin" else None,
         "student_forward_ms_batch_1": student_ms,
         "teacher_forward_ms_batch_1": teacher_ms,
         "latency_note": "Warm GPU forward-pass time only; excludes image loading, preprocessing, routing, and remote-teacher transport.",
     },
-    "teacher_only": metric(teacher_prediction, torch.zeros_like(labels, dtype=torch.bool)),
-    "student_only": metric(student_prediction, torch.ones_like(labels, dtype=torch.bool)),
+    "teacher_only": metric(
+        teacher_prediction, torch.zeros_like(labels, dtype=torch.bool)
+    ),
+    "student_only": metric(
+        student_prediction, torch.ones_like(labels, dtype=torch.bool)
+    ),
     "margin_delegation": [],
 }
 metrics["teacher_only"]["expected_cascade_forward_ms"] = teacher_ms
 metrics["student_only"]["expected_cascade_forward_ms"] = student_ms
 
-class_keep = torch.isin(student_prediction, in_domain_cpu)
-class_prediction = torch.where(class_keep, student_prediction, teacher_prediction)
-metrics["class_delegation"] = metric(class_prediction, class_keep)
-metrics["class_delegation"]["expected_cascade_forward_ms"] = student_ms + (1 - metrics["class_delegation"]["overall_student_fraction"]) * teacher_ms
+if METHOD != "margin":
+    class_keep = torch.isin(student_prediction, in_domain.cpu())
+    class_prediction = torch.where(class_keep, student_prediction, teacher_prediction)
+    metrics["class_delegation"] = metric(class_prediction, class_keep)
+    metrics["class_delegation"]["expected_cascade_forward_ms"] = (
+        student_ms
+        + (1 - metrics["class_delegation"]["overall_student_fraction"]) * teacher_ms
+    )
 
 per_class = []
 for class_id, synset in enumerate(student_val_data.classes):
     rows = labels == class_id
-    per_class.append(
-        {
-            "class_id": class_id,
-            "synset": synset,
-            "in_domain": class_id in IN_DOMAIN,
-            "samples": rows.sum().item(),
-            "teacher_accuracy": (teacher_prediction[rows] == labels[rows]).float().mean().item(),
-            "student_accuracy": (student_prediction[rows] == labels[rows]).float().mean().item(),
-            "class_delegation_accuracy": (class_prediction[rows] == labels[rows]).float().mean().item(),
-            "class_delegation_student_fraction": class_keep[rows].float().mean().item(),
-        }
-    )
+    row = {
+        "class_id": class_id,
+        "synset": synset,
+        "samples": rows.sum().item(),
+        "teacher_accuracy": (teacher_prediction[rows] == labels[rows])
+        .float()
+        .mean()
+        .item(),
+        "student_accuracy": (student_prediction[rows] == labels[rows])
+        .float()
+        .mean()
+        .item(),
+    }
+    if METHOD != "margin":
+        row.update(
+            {
+                "in_domain": class_id in IN_DOMAIN,
+                "class_delegation_accuracy": (class_prediction[rows] == labels[rows])
+                .float()
+                .mean()
+                .item(),
+                "class_delegation_student_fraction": class_keep[rows]
+                .float()
+                .mean()
+                .item(),
+            }
+        )
+    per_class.append(row)
 
 
 def min_max(rows, key):
     low = min(rows, key=lambda row: row[key])
     high = max(rows, key=lambda row: row[key])
     return {
-        "min": {"class_id": low["class_id"], "synset": low["synset"], "accuracy": low[key]},
-        "max": {"class_id": high["class_id"], "synset": high["synset"], "accuracy": high[key]},
+        "min": {
+            "class_id": low["class_id"],
+            "synset": low["synset"],
+            "accuracy": low[key],
+        },
+        "max": {
+            "class_id": high["class_id"],
+            "synset": high["synset"],
+            "accuracy": high[key],
+        },
     }
 
 
-in_domain_classes = [row for row in per_class if row["in_domain"]]
 metrics["per_class"] = per_class
 metrics["per_class_min_max"] = {
     "teacher": min_max(per_class, "teacher_accuracy"),
     "student": min_max(per_class, "student_accuracy"),
-    "class_delegation": min_max(per_class, "class_delegation_accuracy"),
-    "in_domain_student": min_max(in_domain_classes, "student_accuracy"),
-    "in_domain_class_delegation": min_max(in_domain_classes, "class_delegation_accuracy"),
 }
-
-student_probs = torch.softmax(student_scores, dim=1)
-top_two = student_probs.topk(2, dim=1).values
-margin = top_two[:, 0] - top_two[:, 1]
+if METHOD != "margin":
+    in_domain_classes = [row for row in per_class if row["in_domain"]]
+    metrics["per_class_min_max"].update(
+        {
+            "class_delegation": min_max(per_class, "class_delegation_accuracy"),
+            "in_domain_student": min_max(in_domain_classes, "student_accuracy"),
+            "in_domain_class_delegation": min_max(
+                in_domain_classes, "class_delegation_accuracy"
+            ),
+        }
+    )
 for rho in range(101):
     keep_student = margin >= rho / 100
     prediction = torch.where(keep_student, student_prediction, teacher_prediction)
     row = {"rho": rho / 100, **metric(prediction, keep_student)}
-    row["expected_cascade_forward_ms"] = student_ms + (1 - row["overall_student_fraction"]) * teacher_ms
+    row["expected_cascade_forward_ms"] = (
+        student_ms + (1 - row["overall_student_fraction"]) * teacher_ms
+    )
     metrics["margin_delegation"].append(row)
 
 with (OUTPUT / "metrics.json").open("w") as file:
     json.dump(metrics, file, indent=2)
 print(json.dumps(metrics["per_class_min_max"], indent=2))
-print(json.dumps({name: value for name, value in metrics.items() if name not in {"margin_delegation", "per_class"}}, indent=2))
+print(
+    json.dumps(
+        {
+            name: value
+            for name, value in metrics.items()
+            if name not in {"margin_delegation", "per_class"}
+        },
+        indent=2,
+    )
+)
 print(f"wrote {OUTPUT / 'metrics.json'}")
