@@ -25,7 +25,7 @@ METHOD = "margin"  # "baseline", "class", "margin"
 ALPHA = 0.6
 STUDENT_WIDTH = 0.75
 IN_DOMAIN = set(range(300))  # 300 is reported, but not which 300
-MARGIN_IN_DOMAIN = 0.4
+MARGIN_IN_DOMAIN = 0.4  # fixed teacher-margin evaluation mask
 
 # not reported by paper
 RHO_TRAIN = 0.8
@@ -188,13 +188,16 @@ student_prediction = student_scores.argmax(1)
 student_probs = torch.softmax(student_scores, dim=1)
 top_two = student_probs.topk(2, dim=1).values
 margin = top_two[:, 0] - top_two[:, 1]
+teacher_probs = torch.softmax(teacher_val, dim=1)
+teacher_top_two = teacher_probs.topk(2, dim=1).values
+teacher_margin = teacher_top_two[:, 0] - teacher_top_two[:, 1]
 in_domain_rows = (
-    margin >= MARGIN_IN_DOMAIN
+    teacher_margin >= MARGIN_IN_DOMAIN
     if METHOD == "margin"
     else torch.isin(labels, in_domain.cpu())
 )
 in_domain_definition = (
-    f"student margin >= {MARGIN_IN_DOMAIN}"
+    f"teacher margin >= {MARGIN_IN_DOMAIN}"
     if METHOD == "margin"
     else "true label in configured class IDs"
 )

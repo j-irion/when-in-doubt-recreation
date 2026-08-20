@@ -1,4 +1,4 @@
-"""Rewrite margin-run metrics using Figure 7's student-margin in-domain mask."""
+"""Rewrite margin-run metrics using a fixed teacher-margin in-domain mask."""
 
 import json
 from pathlib import Path
@@ -16,7 +16,7 @@ OUTPUT = Path("artifacts/imagenet1k-margin")
 STUDENT_WIDTH = 0.75
 STUDENT_BATCH_SIZE = 256
 WORKERS = 8
-MARGIN_IN_DOMAIN = 0.4  # Figure 7 caption
+MARGIN_IN_DOMAIN = 0.4  # Section 5.2 easy-example definition
 DEVICE = "cuda"
 
 
@@ -74,7 +74,9 @@ teacher_prediction = teacher_scores.argmax(1)
 student_probs = torch.softmax(student_scores, dim=1)
 top_two = student_probs.topk(2, dim=1).values
 margin = top_two[:, 0] - top_two[:, 1]
-in_domain_rows = margin >= MARGIN_IN_DOMAIN
+teacher_probs = torch.softmax(teacher_scores, dim=1)
+teacher_top_two = teacher_probs.topk(2, dim=1).values
+in_domain_rows = teacher_top_two[:, 0] - teacher_top_two[:, 1] >= MARGIN_IN_DOMAIN
 
 
 def metric(prediction, keep_student):
@@ -92,7 +94,7 @@ run = metrics["run"]
 run.update(
     {
         "method": "margin",
-        "in_domain_definition": f"student margin >= {MARGIN_IN_DOMAIN}",
+        "in_domain_definition": f"teacher margin >= {MARGIN_IN_DOMAIN}",
         "in_domain_class_ids": None,
         "margin_in_domain_threshold": MARGIN_IN_DOMAIN,
     }
