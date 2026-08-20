@@ -94,6 +94,7 @@ run = metrics["run"]
 run.update(
     {
         "method": "margin",
+        "rho_train": 0.8,
         "in_domain_definition": f"teacher margin >= {MARGIN_IN_DOMAIN}",
         "in_domain_class_ids": None,
         "margin_in_domain_threshold": MARGIN_IN_DOMAIN,

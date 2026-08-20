@@ -18,7 +18,7 @@ from torchvision.transforms import (
 )
 
 DATA = Path("/workspace/julius/data/imagenet1k")
-OUTPUT = Path("artifacts/imagenet1k-margin")
+OUTPUT = Path("artifacts/imagenet1k-margin-6")
 METHOD = "margin"  # "baseline", "class", "margin"
 
 # reported by paper
@@ -28,7 +28,7 @@ IN_DOMAIN = set(range(300))  # 300 is reported, but not which 300
 MARGIN_IN_DOMAIN = 0.4  # fixed teacher-margin evaluation mask
 
 # not reported by paper
-RHO_TRAIN = 0.8
+RHO_TRAIN = 0.6
 TEACHER_BATCH_SIZE = 32
 STUDENT_BATCH_SIZE = 256
 WORKERS = 8

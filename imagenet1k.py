@@ -233,6 +233,7 @@ metrics = {
         "gpu": torch.cuda.get_device_name(0),
         "student_width": STUDENT_WIDTH,
         "method": METHOD,
+        "rho_train": RHO_TRAIN if METHOD == "margin" else None,
         "in_domain_definition": in_domain_definition,
         "in_domain_class_ids": sorted(IN_DOMAIN) if METHOD != "margin" else None,
         "margin_in_domain_threshold": MARGIN_IN_DOMAIN if METHOD == "margin" else None,
