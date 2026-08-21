@@ -11,8 +11,9 @@ from torchvision.datasets.folder import default_loader
 from torchvision.transforms import CenterCrop, Compose, Normalize, Resize, ToTensor
 
 
+ROOT = Path(__file__).resolve().parents[1]
 DATA = Path("/workspace/julius/data/imagenet1k")
-OUTPUT = Path("artifacts/imagenet1k-margin")
+OUTPUT = ROOT / "artifacts/imagenet1k-margin"
 STUDENT_WIDTH = 0.75
 STUDENT_BATCH_SIZE = 256
 WORKERS = 8
