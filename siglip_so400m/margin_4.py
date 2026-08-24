@@ -84,9 +84,8 @@ if not torch.cuda.is_available():
 torch.backends.cudnn.benchmark = True
 OUTPUT.mkdir(parents=True, exist_ok=True)
 teacher = timm.create_model(TEACHER_NAME, pretrained=True).to(DEVICE).eval()
-teacher_transform = timm.data.create_transform(
-    **timm.data.resolve_model_data_config(teacher), is_training=False
-)
+teacher_config = timm.data.resolve_model_data_config(teacher)
+teacher_transform = timm.data.create_transform(**teacher_config, is_training=False)
 teacher_train_loader = loader(
     Images(DATA / "train", train=False, teacher=True), TEACHER_BATCH_SIZE
 )
@@ -221,7 +220,7 @@ def latency_ms(model, size):
 
 
 student_ms = latency_ms(student, 224)
-teacher_ms = latency_ms(teacher, 475)
+teacher_ms = latency_ms(teacher, teacher_config["input_size"][1])
 metrics = {
     "run": {
         "gpu": torch.cuda.get_device_name(0),
