@@ -132,6 +132,19 @@ optimizer = torch.optim.AdamW(
 )  # not specified in the paper
 in_domain = torch.tensor(sorted(IN_DOMAIN), device=DEVICE)
 
+def validation_accuracy():
+    student.eval()
+    correct = total = 0
+    with torch.inference_mode():
+        for images, labels, _ in student_val_loader:
+            prediction = student(images.to(DEVICE)).argmax(1).cpu()
+            correct += (prediction == labels).sum().item()
+            total += len(labels)
+    return correct / total
+
+
+history = []
+
 for epoch in range(EPOCHS):
     student.train()
     total_loss = 0.0
@@ -171,8 +184,20 @@ for epoch in range(EPOCHS):
             print(
                 f"epoch {epoch + 1}/{EPOCHS}: {batch}/{len(student_train_loader)} batches"
             )
+    train_loss = total_loss / len(student_train_data)
+    validation_top1_accuracy = validation_accuracy()
+    history.append(
+        {
+            "epoch": epoch + 1,
+            "train_loss": train_loss,
+            "validation_student_top1_accuracy": validation_top1_accuracy,
+        }
+    )
+    with (OUTPUT / "history.json").open("w") as file:
+        json.dump(history, file, indent=2)
     print(
-        f"epoch {epoch + 1}/{EPOCHS}: loss={total_loss / len(student_train_data):.4f}"
+        f"epoch {epoch + 1}/{EPOCHS}: loss={train_loss:.4f} "
+        f"val_top1={validation_top1_accuracy:.4f}"
     )
 
 torch.save(student.state_dict(), OUTPUT / "student.pt")
@@ -242,6 +267,7 @@ metrics = {
         "teacher_forward_ms_batch_1": teacher_ms,
         "latency_note": "Warm GPU forward-pass time only; excludes image loading, preprocessing, routing, and remote-teacher transport.",
     },
+    "history": history,
     "teacher_only": metric(
         teacher_prediction, torch.zeros_like(labels, dtype=torch.bool)
     ),

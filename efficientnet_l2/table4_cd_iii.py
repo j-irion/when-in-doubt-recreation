@@ -19,17 +19,17 @@ from torchvision.transforms import (
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path("/workspace/julius/data/imagenet1k")
-OUTPUT = ROOT / "artifacts/imagenet1k-margin-6"
-METHOD = "margin"  # "baseline", "class", "margin"
+OUTPUT = ROOT / "artifacts/imagenet1k-cdiii-head300"
+METHOD = "cd_iii"  # "baseline", "class", "margin"
 
 # reported by paper
 ALPHA = 0.6
 STUDENT_WIDTH = 0.75
-IN_DOMAIN = set(range(300))  # 300 is reported, but not which 300
-MARGIN_IN_DOMAIN = 0.4  # fixed teacher-margin evaluation mask
+IN_DOMAIN = None  # derived from the 300 largest train folders
+MARGIN_IN_DOMAIN = 0.4
 
 # not reported by paper
-RHO_TRAIN = 0.6
+RHO_TRAIN = 0.8
 TEACHER_BATCH_SIZE = 32
 STUDENT_BATCH_SIZE = 256
 WORKERS = 8
@@ -97,6 +97,23 @@ teacher_val_loader = loader(
 )
 student_train_data = Images(DATA / "train", train=True, teacher=False)
 student_val_data = Images(DATA / "val", train=False, teacher=False)
+if student_train_data.classes != student_val_data.classes:
+    raise SystemExit("train and validation class mappings differ")
+class_counts = [0] * len(student_train_data.classes)
+for _, label in student_train_data.images:
+    class_counts[label] += 1
+IN_DOMAIN = set(
+    sorted(
+        range(len(class_counts)),
+        key=lambda class_id: (-class_counts[class_id], student_train_data.classes[class_id]),
+    )[:300]
+)
+print(
+    "head-300 train images per class:",
+    min(class_counts[class_id] for class_id in IN_DOMAIN),
+    "to",
+    max(class_counts[class_id] for class_id in IN_DOMAIN),
+)
 student_train_loader = loader(student_train_data, STUDENT_BATCH_SIZE, shuffle=True)
 student_val_loader = loader(student_val_data, STUDENT_BATCH_SIZE)
 
@@ -106,7 +123,7 @@ teacher = (
     .eval()
 )
 student_name = f"mobilenetv3_large_{int(STUDENT_WIDTH * 100):03d}"
-student = timm.create_model(student_name, pretrained=False, num_classes=1000).to(DEVICE)
+student = timm.create_model(student_name, pretrained=False, num_classes=301).to(DEVICE)
 
 
 def cached_logits(data_loader, name):
@@ -131,6 +148,27 @@ optimizer = torch.optim.AdamW(
     student.parameters(), lr=LEARNING_RATE
 )  # not specified in the paper
 in_domain = torch.tensor(sorted(IN_DOMAIN), device=DEVICE)
+domain_index = torch.full((1000,), len(in_domain), device=DEVICE)
+domain_index[in_domain] = torch.arange(len(in_domain), device=DEVICE)
+
+
+def validation_accuracy():
+    student.eval()
+    correct = total = 0
+    with torch.inference_mode():
+        for images, labels, _ in student_val_loader:
+            student_index = student(images.to(DEVICE)).argmax(1)
+            prediction = torch.full_like(labels, -1)
+            keep_student = student_index != len(in_domain)
+            prediction[keep_student.cpu()] = in_domain.cpu()[
+                student_index[keep_student].cpu()
+            ]
+            correct += (prediction == labels).sum().item()
+            total += len(labels)
+    return correct / total
+
+
+history = []
 
 for epoch in range(EPOCHS):
     student.train()
@@ -138,25 +176,13 @@ for epoch in range(EPOCHS):
     for batch, (images, labels, indices) in enumerate(student_train_loader, 1):
         labels = labels.to(DEVICE)
         teacher_scores = teacher_train[indices].to(DEVICE)
-        teacher_probs = torch.softmax(teacher_scores, dim=1)
-
-        if METHOD == "baseline":
-            targets = teacher_probs
-        elif METHOD == "class":
-            targets = teacher_probs.clone()
-            hard = ~torch.isin(labels, in_domain)
-            targets[hard] = (1 - ALPHA) * torch.nn.functional.one_hot(
-                labels[hard], 1000
-            ) + ALPHA / 1000
-        elif METHOD == "margin":
-            top_two = teacher_probs.topk(2, dim=1).values
-            hard = top_two[:, 0] - top_two[:, 1] <= RHO_TRAIN
-            targets = teacher_probs.clone()
-            targets[hard] = (1 - ALPHA) * torch.nn.functional.one_hot(
-                labels[hard], 1000
-            ) + ALPHA / 1000
-        else:
-            raise ValueError("METHOD must be baseline, class, or margin")
+        student_labels = domain_index[labels]
+        hard = student_labels == len(in_domain)
+        targets = torch.zeros(len(labels), len(in_domain) + 1, device=DEVICE)
+        targets[hard, -1] = 1
+        targets[~hard, :-1] = torch.softmax(
+            teacher_scores[~hard][:, in_domain], dim=1
+        )
 
         optimizer.zero_grad()
         loss = (
@@ -171,8 +197,20 @@ for epoch in range(EPOCHS):
             print(
                 f"epoch {epoch + 1}/{EPOCHS}: {batch}/{len(student_train_loader)} batches"
             )
+    train_loss = total_loss / len(student_train_data)
+    validation_top1_accuracy = validation_accuracy()
+    history.append(
+        {
+            "epoch": epoch + 1,
+            "train_loss": train_loss,
+            "validation_student_top1_accuracy": validation_top1_accuracy,
+        }
+    )
+    with (OUTPUT / "history.json").open("w") as file:
+        json.dump(history, file, indent=2)
     print(
-        f"epoch {epoch + 1}/{EPOCHS}: loss={total_loss / len(student_train_data):.4f}"
+        f"epoch {epoch + 1}/{EPOCHS}: loss={train_loss:.4f} "
+        f"val_top1={validation_top1_accuracy:.4f}"
     )
 
 torch.save(student.state_dict(), OUTPUT / "student.pt")
@@ -185,7 +223,10 @@ with torch.inference_mode():
 student_scores = torch.cat(student_scores)
 labels = torch.cat(labels)
 teacher_prediction = teacher_val.argmax(1)
-student_prediction = student_scores.argmax(1)
+student_index = student_scores.argmax(1)
+class_keep = student_index != len(in_domain)
+student_prediction = torch.full_like(labels, -1)
+student_prediction[class_keep] = in_domain.cpu()[student_index[class_keep]]
 student_probs = torch.softmax(student_scores, dim=1)
 top_two = student_probs.topk(2, dim=1).values
 margin = top_two[:, 0] - top_two[:, 1]
@@ -234,6 +275,9 @@ metrics = {
         "gpu": torch.cuda.get_device_name(0),
         "student_width": STUDENT_WIDTH,
         "method": METHOD,
+        "alpha": None,
+        "variant": "CD-III: in-domain classifier plus abstain class",
+        "in_domain_selection": "300 largest train folders; synset breaks ties",
         "rho_train": RHO_TRAIN if METHOD == "margin" else None,
         "in_domain_definition": in_domain_definition,
         "in_domain_class_ids": sorted(IN_DOMAIN) if METHOD != "margin" else None,
@@ -242,6 +286,7 @@ metrics = {
         "teacher_forward_ms_batch_1": teacher_ms,
         "latency_note": "Warm GPU forward-pass time only; excludes image loading, preprocessing, routing, and remote-teacher transport.",
     },
+    "history": history,
     "teacher_only": metric(
         teacher_prediction, torch.zeros_like(labels, dtype=torch.bool)
     ),

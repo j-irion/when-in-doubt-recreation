@@ -12,12 +12,12 @@ if len(sys.argv) == 1:
         Path("metrics/efficientnet_l2/margin_4/metrics.json"),
         Path("metrics/efficientnet_l2/margin_6/metrics.json"),
     ]
-    OUTPUT = Path("plots/efficientnet_l2/margin_4_6/figure7_margin.png")
+    OUTPUT = Path("plots/efficientnet_l2/figure7/figure7_margin.png")
 elif len(sys.argv) == 4:
     RUNS = [Path(sys.argv[1]), Path(sys.argv[2])]
     OUTPUT = Path(sys.argv[3])
 else:
-    raise SystemExit("Usage: python plot_figure7.py metrics_4.json metrics_6.json output.png")
+    raise SystemExit("Usage: python figure7_plot.py metrics_4.json metrics_6.json output.png")
 
 
 fig, axes = plt.subplots(1, 2, figsize=(8, 4))
@@ -36,5 +36,5 @@ for axis, title in zip(axes, ["(a) Overall accuracy", "(b) In-domain accuracy"])
     axis.grid()
 fig.suptitle("In-domain: teacher margin ≥ 0.4")
 fig.tight_layout()
-OUTPUT.parent.mkdir(exist_ok=True)
+OUTPUT.parent.mkdir(parents=True, exist_ok=True)
 fig.savefig(OUTPUT, dpi=200)
