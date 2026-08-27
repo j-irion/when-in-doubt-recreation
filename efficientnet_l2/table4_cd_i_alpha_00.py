@@ -19,7 +19,7 @@ from torchvision.transforms import (
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path("/workspace/julius/data/imagenet1k")
-OUTPUT = ROOT / "artifacts/imagenet1k-cdi-head300-alpha00"
+OUTPUT = ROOT / "artifacts/imagenet1k-cdi-head300-alpha00-30e-cosine"
 METHOD = "class"  # "baseline", "class", "margin"
 
 # reported by paper
@@ -33,7 +33,7 @@ RHO_TRAIN = 0.8
 TEACHER_BATCH_SIZE = 32
 STUDENT_BATCH_SIZE = 256
 WORKERS = 8
-EPOCHS = 10
+EPOCHS = 30
 LEARNING_RATE = 1e-3
 
 DEVICE = "cuda"
@@ -147,6 +147,9 @@ teacher_val = cached_logits(teacher_val_loader, "teacher_val.pt")
 optimizer = torch.optim.AdamW(
     student.parameters(), lr=LEARNING_RATE
 )  # not specified in the paper
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+    optimizer, T_max=EPOCHS, eta_min=LEARNING_RATE * 0.01
+)
 in_domain = torch.tensor(sorted(IN_DOMAIN), device=DEVICE)
 
 def validation_accuracy():
@@ -206,15 +209,17 @@ for epoch in range(EPOCHS):
     history.append(
         {
             "epoch": epoch + 1,
+            "learning_rate": optimizer.param_groups[0]["lr"],
             "train_loss": train_loss,
             "validation_student_top1_accuracy": validation_top1_accuracy,
         }
     )
+    scheduler.step()
     with (OUTPUT / "history.json").open("w") as file:
         json.dump(history, file, indent=2)
     print(
-        f"epoch {epoch + 1}/{EPOCHS}: loss={train_loss:.4f} "
-        f"val_top1={validation_top1_accuracy:.4f}"
+        f"epoch {epoch + 1}/{EPOCHS}: lr={history[-1]['learning_rate']:.2e} "
+        f"loss={train_loss:.4f} val_top1={validation_top1_accuracy:.4f}"
     )
 
 torch.save(student.state_dict(), OUTPUT / "student.pt")
@@ -276,6 +281,9 @@ metrics = {
         "gpu": torch.cuda.get_device_name(0),
         "student_width": STUDENT_WIDTH,
         "method": METHOD,
+        "epochs": EPOCHS,
+        "learning_rate": LEARNING_RATE,
+        "learning_rate_schedule": "cosine to 1% of initial learning rate",
         "alpha": ALPHA,
         "in_domain_selection": "300 largest train folders; synset breaks ties",
         "rho_train": RHO_TRAIN if METHOD == "margin" else None,

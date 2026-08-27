@@ -1,5 +1,10 @@
 # ImageNet-1k two-stage distillation
 
+This repository retains only the paper-style ImageNet-1k experiments:
+
+- Table 4: baseline, CD-I (`alpha=0.0`, `0.4`, `0.6`), and CD-III with class-based delegation.
+- Figure 7: margin-based distillation with `rho_train=0.4` and `0.6`.
+
 Prepare ILSVRC-2012 at:
 
 ```text
@@ -7,43 +12,46 @@ Prepare ILSVRC-2012 at:
 /workspace/julius/data/imagenet1k/val/<synset>/*.JPEG
 ```
 
-Run commands from the repository root.
+Run commands from the repository root. The first run needs existing EfficientNet-L2 teacher caches in `artifacts/imagenet1k/`; all experiment-specific directories hard-link those caches.
 
-## EfficientNet-L2 teacher
+## Table 4: MobileNetV3-0.75
 
 ```bash
-uv run python efficientnet_l2/class.py
-./efficientnet_l2/prepare_cache.sh artifacts/imagenet1k-margin-4
-uv run python efficientnet_l2/margin_4.py
-./efficientnet_l2/prepare_cache.sh artifacts/imagenet1k-margin-6
-uv run python efficientnet_l2/margin_6.py
+bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-baseline-head300-30e-cosine
+uv run python efficientnet_l2/table4_baseline.py
+
+bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-cdi-head300-alpha00-30e-cosine
+uv run python efficientnet_l2/table4_cd_i_alpha_00.py
+
+bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-cdi-head300-alpha04-30e-cosine
+uv run python efficientnet_l2/table4_cd_i_alpha_04.py
+
+bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-cdi-head300-alpha06-30e-cosine
+uv run python efficientnet_l2/table4_cd_i_alpha_06.py
+
+bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-cdiii-head300-30e-cosine
+uv run python efficientnet_l2/table4_cd_iii.py
 ```
 
-`margin_8.py` is the earlier exploratory run, not a Figure 7 setting.
+The scripts select the 300 largest ImageNet training folders, breaking ties by synset. This is a public proxy for the paper’s unreleased `L_in` list.
 
-## SigLIP So400M teacher
+All Table 4 scripts use the same 30-epoch AdamW baseline recipe: initial learning rate `1e-3`, cosine decay to `1e-5`, and per-epoch loss, validation top-1, and learning-rate history. Run all five sequentially with `bash run_table4.sh`.
+
+## Figure 7: margin-based distillation
 
 ```bash
-uv run python siglip_so400m/class.py
-./siglip_so400m/prepare_cache.sh artifacts/imagenet1k-siglip-margin-4
-uv run python siglip_so400m/margin_4.py
-./siglip_so400m/prepare_cache.sh artifacts/imagenet1k-siglip-margin-6
-uv run python siglip_so400m/margin_6.py
+bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-margin-4
+uv run python efficientnet_l2/figure7_md_rho_train_04.py
+
+bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-margin-6
+uv run python efficientnet_l2/figure7_md_rho_train_06.py
 ```
 
-Each model writes separate artifacts under `artifacts/`.
-
-## Plots
-
-Only per-class accuracy and the Figure 7 recreation are retained:
+Create the two-panel Figure 7 recreation after copying the two metrics files locally:
 
 ```bash
-uv run --with matplotlib python plot_metrics.py \
-  artifacts/imagenet1k-siglip-class/metrics.json \
-  plots/siglip_so400m/class
-
-uv run --with matplotlib python plot_figure7.py \
-  artifacts/imagenet1k-siglip-margin-4/metrics.json \
-  artifacts/imagenet1k-siglip-margin-6/metrics.json \
-  plots/siglip_so400m/margin_4_6/figure7_margin.png
+uv run --with matplotlib python figure7_plot.py \
+  metrics/efficientnet_l2/margin_4/metrics.json \
+  metrics/efficientnet_l2/margin_6/metrics.json \
+  plots/efficientnet_l2/figure7/figure7_margin.png
 ```

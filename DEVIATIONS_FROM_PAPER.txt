@@ -1,122 +1,20 @@
-Known deviations and unreported choices in imagenet1k.py
-============================================================
+Known deviations
+================
 
-- Status: this is a public-equivalent, first-pass implementation. It is not an exact reproduction of the paper's ImageNet-1k experiments.
+This is a public-equivalent ImageNet-1k implementation, not an exact reproduction.
 
-- The paper reports an EfficientNet-L2 teacher, 475px input resolution, MobileNetV3 students, MobileNetV3-0.75 for Figure 3, and |L_in| = 300 for the ImageNet-1k class-specific figure.
+- The paper does not release code, the exact EfficientNet-L2 checkpoint revision, student initialization, `L_in` identities, optimizer, schedule, augmentation, temperature, seed, or latency protocol.
 
-- The paper does not release code, exact teacher checkpoint revision, student initialization, selected 300-class set, optimizer, weight decay, learning-rate schedule, batch sizes, epoch count, augmentation, preprocessing, temperature, seed, hardware, or latency protocol.
+- The teacher is Timm's PyTorch port `tf_efficientnet_l2.ns_jft_in1k_475`, rather than the authors' exact TensorFlow checkpoint. Its fixed 475px preprocessing and cached logits are implementation choices.
 
-Teacher differences
--------------------
+- Table 4 scripts use the 300 largest ImageNet training folders as `L_in`, breaking ties by synset. The paper's 300 synsets are undisclosed, so this is only a deterministic public proxy.
 
-- The script loads Timm's PyTorch port named tf_efficientnet_l2.ns_jft_in1k_475.
+- The Table 4 student is Timm `mobilenetv3_large_075`, randomly initialized and trained for 30 epochs with AdamW (initial `lr=1e-3`, default weight decay), cosine decay to `1e-5`, basic crop/flip augmentation, no seed, and temperature 1. Figure 7 scripts retain their earlier 10-epoch constant-rate recipe. These choices are not reported by the paper.
 
-- The official Google artifact is a TensorFlow Noisy Student EfficientNet-L2-475 checkpoint. Timm is a converted/repackaged PyTorch checkpoint, not the original TensorFlow artifact format.
+- Table 4 scripts implement baseline, CD-I (`alpha=0.0`, `0.4`, `0.6`), and CD-III. Baseline metrics use `student_only`; CD-I/CD-III metrics use `class_delegation`.
 
-- The paper reports an EfficientNet-L2 accuracy of 88.6% on ImageNet. The official L2-475 Noisy Student release table reports 88.2%. The exact paper checkpoint/version is therefore not established.
+- Figure 7 scripts implement margin-based distillation with `rho_train=0.4` and `0.6`. In-domain reporting uses a fixed teacher margin >= 0.4, following Section 5.2; Figure 7's caption instead says student margin >= 0.4.
 
-- The script uses the teacher in eval mode and caches logits before student training. The paper does not state whether logits were cached or recomputed online.
+- Each training run records epoch training loss and validation student top-1 accuracy in `history.json` and final `metrics.json`. Per-epoch validation is a reporting addition.
 
-- Caching is mathematically equivalent only if teacher inputs are fixed. The script uses fixed teacher preprocessing; any undisclosed teacher-side random augmentation in the authors' pipeline would not be reproduced.
-
-- The script uses softmax temperature 1.0. The paper defines a temperature parameter but does not report the value used in experiments.
-
-Student differences
--------------------
-
-- The script uses Timm's mobilenetv3_large_075 implementation, randomly initialized with pretrained=False.
-
-- MobileNetV3-0.75 is reported for the ImageNet-1k Figure 3 experiment, but the exact implementation/version and whether/how the authors initialized it are not reported.
-
-- The script implements only the baseline, CD-I class-specific loss, and margin-based loss branches.
-
-- The paper's ImageNet-1k Figure 3 also includes CD-III, the appendix abstain-class class-specific variant. That variant is not implemented.
-
-- The script always produces a margin-delegation curve. It does not implement/report the paper's class-based delegation results.
-
-In-domain selection differences
--------------------------------
-
-- The paper reports |L_in| = 300 for ImageNet-1k class-specific experiments.
-
-- The paper does not publish the identities of the 300 ImageNet synsets or a deployment-frequency distribution from which to derive them.
-
-- The script substitutes IN_DOMAIN = set(range(300)). This selects the first 300 ImageFolder class IDs after lexicographically sorting synset directory names. It is arbitrary and is not the paper's documented L_in set.
-
-- ImageNet-1k is approximately class-balanced, so its training-image counts do not define a natural head/tail class split.
-
-- ALPHA = 0.6 is a value shown in the paper's CD-I results. The paper does not give a complete per-run ImageNet-1k configuration proving that this is the exact Figure 3 setting.
-
-- RHO_TRAIN = 0.8 is guessed. The paper defines rho_train for margin-based distillation but does not provide an ImageNet-1k value. It is unused while METHOD = "class".
-
-Preprocessing and augmentation differences
-------------------------------------------
-
-- The paper states that EfficientNet-L2 uses input resolution 475. The script uses Resize(475), then CenterCrop(475). The resize/crop policy itself is not reported by the paper.
-
-- Teacher normalization is mean=(0.485, 0.456, 0.406) and std=(0.229, 0.224, 0.225). These are declared by the selected Timm checkpoint's preprocessing configuration; the paper does not state them.
-
-- Student training uses RandomResizedCrop(224) and RandomHorizontalFlip(). These are common PyTorch ImageNet augmentations, not reported by the paper.
-
-- Student validation uses Resize(256), then CenterCrop(224). This is a common ImageNet evaluation convention, not reported by the paper.
-
-- Student normalization uses mean=(0.485, 0.456, 0.406) and std=(0.229, 0.224, 0.225). This is a common ImageNet/Timm convention, not reported by the paper.
-
-- The script decodes images with torchvision/PIL and uses ImageFolder's lexicographically sorted directory-to-label mapping. The paper does not specify its input loader or label-mapping implementation.
-
-Training differences
---------------------
-
-- Optimizer: AdamW is guessed. The paper does not identify an optimizer.
-
-- AdamW weight decay is not explicitly set, so PyTorch's AdamW default weight_decay=0.01 is used. This is guessed.
-
-- LEARNING_RATE = 0.001 is guessed.
-
-- EPOCHS = 90 is guessed.
-
-- There is no learning-rate schedule, warmup, gradient clipping, mixup, cutmix, RandAugment, label smoothing beyond the paper's CD-I target, or other training recipe. The paper does not say whether it used any of these.
-
-- TEACHER_BATCH_SIZE = 32 is guessed for the 475px EfficientNet-L2 cache pass.
-
-- STUDENT_BATCH_SIZE = 256 is guessed for the NVIDIA L40. It was selected to use the available GPU more effectively, not to match the paper.
-
-- WORKERS = 8 is guessed and machine-specific.
-
-- Student training uses shuffle=True. Each dataset item includes its original ImageFolder index, and the script indexes the fixed-order cached teacher logits with that index. The paper does not state its shuffling/cache implementation.
-
-- The script does not set a random seed. Random crop/flip, student initialization, CUDA kernels, and data workers therefore make results non-deterministic.
-
-- torch.backends.cudnn.benchmark=True is enabled for speed. It can select different convolution kernels across environments and weakens bit-for-bit reproducibility.
-
-- The experiment runs on one NVIDIA L40 with current PyTorch/CUDA/Timm versions. The paper does not report matching hardware/software, so latency cannot be compared.
-
-Evaluation differences
-----------------------
-
-- The final reporting block in imagenet1k.py logs overall accuracy, in-domain accuracy, overall/in-domain student fraction, class-based delegation, margin-based delegation, per-class accuracy, per-class minimum/maximum summaries, and a local batch-1 GPU-forward latency estimate. This is a reporting addition, not part of the authors' released protocol.
-
-- The local latency estimate excludes image preprocessing, loading, cache access, routing, and remote-teacher transport. It is not comparable to the paper's latency measurement.
-
-- The script sweeps routing thresholds from 0.00 through 1.00 in 0.01 increments. This grid is an implementation choice; the paper does not state its threshold grid.
-
-- The script uses the validation set both to produce the routing curve and to report final quality. It has no separate threshold-calibration split.
-
-- The paper's reported latency/cost results depend on its hardware and serving setup. The script's cached offline teacher inference does not measure an online student-to-teacher fallback request.
-
-Dataset handling
-----------------
-
-- The script uses the official ILSVRC-2012 train and validation image data, which matches the paper's stated ImageNet-1k dataset sizes.
-
-- Validation images were rearranged into synset folders for torchvision ImageFolder. This is a storage/layout conversion, not an intended data change, but the paper does not document its loader.
-
-Current-run note
-----------------
-
-- An earlier script version trained four student epochs with batch size 32 and unnecessarily constructed 475px teacher transforms during student training. It was interrupted before saving student.pt.
-
-- The first 90-epoch restarted run used shuffle=False, so ImageFolder yielded class-sorted batches. It produced chance-level student accuracy (0.1%) and is invalid. Its student.pt/results.json must not be used.
-
-- The corrected run reuses teacher_train.pt and teacher_val.pt, starts a new randomly initialized student, uses shuffled student batches indexed into the cache, and does not include any earlier student-training epochs.
+- Local latency is a warm GPU forward-pass estimate only. It excludes preprocessing, I/O, routing, and remote teacher transport and is not comparable to the paper's latency measurements.
