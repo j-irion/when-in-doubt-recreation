@@ -19,7 +19,7 @@ from torchvision.transforms import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA = Path("/workspace/julius/data/imagenet1k")
+DATA = Path.home() / "data/imagenet1k"
 OUTPUT = ROOT / "artifacts/imagenet1k-cdi-head300-alpha00-30e-cosine"
 METHOD = "class"  # "baseline", "class", "margin"
 

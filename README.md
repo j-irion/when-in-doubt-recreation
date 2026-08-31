@@ -8,8 +8,8 @@ This repository retains only the paper-style ImageNet-1k experiments:
 Prepare ILSVRC-2012 at:
 
 ```text
-/workspace/julius/data/imagenet1k/train/<synset>/*.JPEG
-/workspace/julius/data/imagenet1k/val/<synset>/*.JPEG
+~/data/imagenet1k/train/<synset>/*.JPEG
+~/data/imagenet1k/val/<synset>/*.JPEG
 ```
 
 Run commands from the repository root. The first cache-preparation command builds a versioned EfficientNet-L2 cache in `artifacts/teacher-cache-efficientnet-l2-475-crop936-bicubic/` using the checkpoint’s declared bicubic resize-to-507 then center-crop-to-475 evaluation transform. Experiment directories hard-link that cache; the older `artifacts/imagenet1k/` logits are not used.

@@ -12,7 +12,7 @@ from torchvision.datasets import ImageFolder
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DATA = Path("/workspace/julius/data/imagenet1k")
+DATA = Path.home() / "data/imagenet1k"
 OUTPUT = ROOT / "artifacts/teacher-cache-efficientnet-l2-475-crop936-bicubic"
 MODEL_NAME = "tf_efficientnet_l2.ns_jft_in1k_475"
 BATCH_SIZE = 32
