@@ -20,13 +20,13 @@ from torchvision.transforms import (
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path.home() / "data/imagenet1k"
-OUTPUT = ROOT / "artifacts/imagenet1k-cdi-head300-alpha04-30e-cosine"
+OUTPUT = ROOT / "artifacts/imagenet1k-cdi-head300-alpha04-30e-cosine-systematic300"
 METHOD = "class"  # "baseline", "class", "margin"
 
 # reported by paper
 ALPHA = 0.4
 STUDENT_WIDTH = 0.75
-IN_DOMAIN = None  # derived from the 300 largest train folders
+IN_DOMAIN = None  # systematic sample of classes with 1300 train images
 MARGIN_IN_DOMAIN = 0.4
 
 # not reported by paper
@@ -104,17 +104,18 @@ if student_train_data.classes != student_val_data.classes:
 class_counts = [0] * len(student_train_data.classes)
 for _, label in student_train_data.images:
     class_counts[label] += 1
-IN_DOMAIN = set(
-    sorted(
-        range(len(class_counts)),
-        key=lambda class_id: (-class_counts[class_id], student_train_data.classes[class_id]),
-    )[:300]
-)
+eligible_class_ids = [
+    class_id for class_id, count in enumerate(class_counts) if count == 1300
+]
+if len(eligible_class_ids) < 300:
+    raise SystemExit("Need at least 300 ImageNet classes with exactly 1300 train images")
+IN_DOMAIN = {
+    eligible_class_ids[index * len(eligible_class_ids) // 300] for index in range(300)
+}
 print(
-    "head-300 train images per class:",
-    min(class_counts[class_id] for class_id in IN_DOMAIN),
-    "to",
-    max(class_counts[class_id] for class_id in IN_DOMAIN),
+    "in-domain classes: 300 systematic samples from",
+    len(eligible_class_ids),
+    "classes with exactly 1300 train images",
 )
 student_train_loader = loader(student_train_data, STUDENT_BATCH_SIZE, shuffle=True)
 student_val_loader = loader(student_val_data, STUDENT_BATCH_SIZE)
@@ -282,7 +283,7 @@ metrics = {
         "learning_rate": LEARNING_RATE,
         "learning_rate_schedule": "cosine to 1% of initial learning rate",
         "alpha": ALPHA,
-        "in_domain_selection": "300 largest train folders; synset breaks ties",
+        "in_domain_selection": "300 evenly spaced classes with exactly 1300 train images",
         "rho_train": RHO_TRAIN if METHOD == "margin" else None,
         "in_domain_definition": in_domain_definition,
         "in_domain_class_ids": sorted(IN_DOMAIN) if METHOD != "margin" else None,

@@ -7,7 +7,7 @@ This is a public-equivalent ImageNet-1k implementation, not an exact reproductio
 
 - The teacher is Timm's PyTorch port `tf_efficientnet_l2.ns_jft_in1k_475`, rather than the authors' exact TensorFlow checkpoint. Teacher inputs use that checkpoint's Timm configuration: bicubic resize to 507px followed by center crop to 475px; logits are cached under a versioned configuration-specific path.
 
-- Table 4 scripts use the 300 largest ImageNet training folders as `L_in`, breaking ties by synset. The paper's 300 synsets are undisclosed, so this is only a deterministic public proxy.
+- Table 4 scripts use 300 evenly spaced synsets from the classes with exactly 1,300 training images as `L_in`. The paper's 300 synsets are undisclosed, so this deterministic systematic sample is only a public proxy.
 
 - The Table 4 student is Timm `mobilenetv3_large_075`, randomly initialized and trained for 30 epochs with AdamW (initial `lr=1e-3`, default weight decay), cosine decay to `1e-5`, basic crop/flip augmentation, no seed, and temperature 1. Figure 7 scripts retain their earlier 10-epoch constant-rate recipe. These choices are not reported by the paper.
 

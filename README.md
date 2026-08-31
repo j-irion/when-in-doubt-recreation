@@ -17,23 +17,23 @@ Run commands from the repository root. The first cache-preparation command build
 ## Table 4: MobileNetV3-0.75
 
 ```bash
-bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-baseline-head300-30e-cosine
+bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-baseline-head300-30e-cosine-systematic300
 uv run python efficientnet_l2/table4_baseline.py
 
-bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-cdi-head300-alpha00-30e-cosine
+bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-cdi-head300-alpha00-30e-cosine-systematic300
 uv run python efficientnet_l2/table4_cd_i_alpha_00.py
 
-bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-cdi-head300-alpha04-30e-cosine
+bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-cdi-head300-alpha04-30e-cosine-systematic300
 uv run python efficientnet_l2/table4_cd_i_alpha_04.py
 
-bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-cdi-head300-alpha06-30e-cosine
+bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-cdi-head300-alpha06-30e-cosine-systematic300
 uv run python efficientnet_l2/table4_cd_i_alpha_06.py
 
-bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-cdiii-head300-30e-cosine
+bash efficientnet_l2/prepare_teacher_cache.sh artifacts/imagenet1k-cdiii-head300-30e-cosine-systematic300
 uv run python efficientnet_l2/table4_cd_iii.py
 ```
 
-The scripts select the 300 largest ImageNet training folders, breaking ties by synset. This is a public proxy for the paper’s unreleased `L_in` list.
+The scripts select 300 evenly spaced synsets from the classes with exactly 1,300 training images. This deterministic systematic sample avoids the prior lexical animal block, but remains a public proxy for the paper’s unreleased `L_in` list.
 
 All Table 4 scripts use the same 30-epoch AdamW baseline recipe: initial learning rate `1e-3`, cosine decay to `1e-5`, and per-epoch loss, validation top-1, and learning-rate history. Run all five sequentially with `bash run_table4.sh`.
 

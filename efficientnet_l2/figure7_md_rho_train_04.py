@@ -26,7 +26,7 @@ METHOD = "margin"  # "baseline", "class", "margin"
 # reported by paper
 ALPHA = 0.6
 STUDENT_WIDTH = 0.75
-IN_DOMAIN = set(range(300))  # 300 is reported, but not which 300
+IN_DOMAIN = None  # margin distillation does not use class-defined in-domain data
 MARGIN_IN_DOMAIN = 0.4  # fixed teacher-margin evaluation mask
 
 # not reported by paper
