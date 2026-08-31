@@ -12,7 +12,7 @@ Prepare ILSVRC-2012 at:
 /workspace/julius/data/imagenet1k/val/<synset>/*.JPEG
 ```
 
-Run commands from the repository root. The first run needs existing EfficientNet-L2 teacher caches in `artifacts/imagenet1k/`; all experiment-specific directories hard-link those caches.
+Run commands from the repository root. The first cache-preparation command builds a versioned EfficientNet-L2 cache in `artifacts/teacher-cache-efficientnet-l2-475-crop936-bicubic/` using the checkpoint’s declared bicubic resize-to-507 then center-crop-to-475 evaluation transform. Experiment directories hard-link that cache; the older `artifacts/imagenet1k/` logits are not used.
 
 ## Table 4: MobileNetV3-0.75
 

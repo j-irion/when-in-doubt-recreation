@@ -4,6 +4,7 @@ from pathlib import Path
 
 import timm
 import torch
+from timm.data import create_transform, resolve_model_data_config
 from torch.utils.data import DataLoader, Dataset
 from torchvision.datasets import ImageFolder
 from torchvision.datasets.folder import default_loader
@@ -45,14 +46,7 @@ class Images(Dataset):
         self.images = folder.samples
         self.classes = folder.classes
         if teacher:
-            self.transform = Compose(
-                [
-                    Resize(475),
-                    CenterCrop(475),
-                    ToTensor(),
-                    Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-                ]
-            )
+            self.transform = teacher_transform
         else:
             self.transform = Compose(
                 [
@@ -89,6 +83,14 @@ if not torch.cuda.is_available():
 
 torch.backends.cudnn.benchmark = True
 OUTPUT.mkdir(parents=True, exist_ok=True)
+teacher = (
+    timm.create_model("tf_efficientnet_l2.ns_jft_in1k_475", pretrained=True)
+    .to(DEVICE)
+    .eval()
+)
+teacher_transform = create_transform(
+    **resolve_model_data_config(teacher), is_training=False
+)
 teacher_train_loader = loader(
     Images(DATA / "train", train=False, teacher=True), TEACHER_BATCH_SIZE
 )
@@ -100,11 +102,6 @@ student_val_data = Images(DATA / "val", train=False, teacher=False)
 student_train_loader = loader(student_train_data, STUDENT_BATCH_SIZE, shuffle=True)
 student_val_loader = loader(student_val_data, STUDENT_BATCH_SIZE)
 
-teacher = (
-    timm.create_model("tf_efficientnet_l2.ns_jft_in1k_475", pretrained=True)
-    .to(DEVICE)
-    .eval()
-)
 student_name = f"mobilenetv3_large_{int(STUDENT_WIDTH * 100):03d}"
 student = timm.create_model(student_name, pretrained=False, num_classes=1000).to(DEVICE)
 
