@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 data/
+eurosat/
 artifacts/
 metrics*.json
 metrics/
