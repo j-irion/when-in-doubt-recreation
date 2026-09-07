@@ -1,4 +1,4 @@
-"""Resumable baseline KD: fine-tuned SpectralGPT+ -> MobileNet on BigEarthNet-S2."""
+"""Resumable baseline/CD-I KD: fine-tuned SpectralGPT+ -> MobileNet on BigEarthNet-S2."""
 
 import argparse
 import hashlib
@@ -11,11 +11,22 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent
+DEFAULT_IN_DOMAIN_LABELS = (
+    "Mixed forest",
+    "Coniferous forest",
+    "Arable land",
+    "Transitional woodland/shrub",
+    "Broad-leaved forest",
+    "Land principally occupied by agriculture, with significant areas of natural vegetation",
+)
 parser = argparse.ArgumentParser()
 parser.add_argument("--spectralgpt-root", type=Path, default=Path.home() / "spectralgpt")
 parser.add_argument("--teacher-checkpoint", type=Path, default=ROOT / "artifacts/spectralgpt-bigearthnet-teacher/checkpoint-149.pth")
 parser.add_argument("--output", type=Path, default=ROOT / "artifacts/spectralgpt-bigearthnet-kd")
 parser.add_argument("--train-split", type=Path, help="Defaults to the fixed 10%-per-label stratified train list.")
+parser.add_argument("--method", choices=("baseline", "cd_i"), default="baseline")
+parser.add_argument("--alpha", type=float, default=0.0, help="CD-I binary label smoothing for out-of-domain labels.")
+parser.add_argument("--in-domain-labels", nargs="*", default=DEFAULT_IN_DOMAIN_LABELS, help="CD-I labels trained against teacher logits; default is the six most frequent training labels.")
 parser.add_argument("--epochs", type=int, default=50, help="Total epochs; resume with a larger value to extend.")
 parser.add_argument("--resume", action="store_true")
 parser.add_argument("--student-model", default="mobilenetv3_large_075")
@@ -57,6 +68,14 @@ for path in (teacher_checkpoint, train_split, val_split, spectralgpt_root / "dat
 
 DEVICE = "cuda"
 LABELS = len(NEW_LABELS)
+if not 0 <= args.alpha <= 1:
+    raise SystemExit("--alpha must be in [0, 1]")
+unknown_labels = set(args.in_domain_labels) - set(NEW_LABELS)
+if unknown_labels:
+    raise SystemExit(f"Unknown in-domain labels: {sorted(unknown_labels)}")
+in_domain = torch.tensor([NEW_LABELS.index(label) for label in args.in_domain_labels], device=DEVICE)
+out_of_domain = torch.ones(LABELS, dtype=torch.bool, device=DEVICE)
+out_of_domain[in_domain] = False
 
 
 class IndexedDataset(Dataset):
@@ -111,6 +130,13 @@ def cache_logits(data_loader, teacher, path):
     return logits
 
 
+def targets_for_batch(teacher_logits, labels):
+    targets = torch.sigmoid(teacher_logits)
+    if args.method == "cd_i":
+        targets[:, out_of_domain] = labels[:, out_of_domain] * (1 - args.alpha) + args.alpha / 2
+    return targets
+
+
 def evaluate(student, data_loader):
     student.eval()
     targets, scores = [], []
@@ -119,10 +145,16 @@ def evaluate(student, data_loader):
             targets.append(labels.numpy())
             scores.append(torch.sigmoid(student(images.to(DEVICE, non_blocking=True))).cpu().numpy())
     targets, scores = np.concatenate(targets), np.concatenate(scores)
-    return {
+    metrics = {
         "validation_macro_mAP": float(average_precision_score(targets, scores, average="macro")),
         "validation_micro_mAP": float(average_precision_score(targets, scores, average="micro")),
     }
+    if args.method == "cd_i":
+        metrics.update(
+            validation_in_domain_macro_mAP=float(average_precision_score(targets[:, in_domain.cpu()], scores[:, in_domain.cpu()], average="macro")),
+            validation_in_domain_micro_mAP=float(average_precision_score(targets[:, in_domain.cpu()], scores[:, in_domain.cpu()], average="micro")),
+        )
+    return metrics
 
 
 def save_checkpoint(path, epoch, student, optimizer, scheduler, history, best_micro_map):
@@ -137,6 +169,9 @@ def save_checkpoint(path, epoch, student, optimizer, scheduler, history, best_mi
             "best_micro_mAP": best_micro_map,
             "student_model": args.student_model,
             "train_split_sha256": train_split_sha256,
+            "method": args.method,
+            "alpha": args.alpha,
+            "in_domain_labels": args.in_domain_labels,
         },
         path,
     )
@@ -165,8 +200,11 @@ if args.smoke_test:
         teacher_logits = teacher(teacher_images.to(DEVICE))
         student_logits = student(student_images.to(DEVICE))
     assert teacher_logits.shape == student_logits.shape == (len(labels), LABELS)
-    assert torch.isfinite(F.binary_cross_entropy_with_logits(student_logits, torch.sigmoid(teacher_logits)))
-    print("smoke test passed: 12 bands, 19 labels, binary soft-target KD")
+    targets = targets_for_batch(teacher_logits, labels.to(DEVICE))
+    assert torch.isfinite(F.binary_cross_entropy_with_logits(student_logits, targets))
+    if args.method == "cd_i" and args.alpha == 0:
+        assert torch.equal(targets[:, out_of_domain], labels.to(DEVICE)[:, out_of_domain])
+    print(f"smoke test passed: 12 bands, 19 labels, {args.method}, alpha={args.alpha}")
     raise SystemExit
 
 teacher_train = cache_logits(
@@ -186,8 +224,8 @@ if args.resume:
     if not last_checkpoint.exists():
         raise SystemExit(f"Missing {last_checkpoint}; cannot resume")
     state = load_checkpoint(last_checkpoint)
-    if state["student_model"] != args.student_model or state.get("train_split_sha256") != train_split_sha256:
-        raise SystemExit("Resume checkpoint uses a different student model or train split")
+    if (state["student_model"] != args.student_model or state.get("train_split_sha256") != train_split_sha256 or state.get("method", "baseline") != args.method or state.get("alpha", 0.0) != args.alpha or state.get("in_domain_labels", list(DEFAULT_IN_DOMAIN_LABELS)) != args.in_domain_labels):
+        raise SystemExit("Resume checkpoint uses different model, split, or CD-I settings")
     student.load_state_dict(state["model"])
     optimizer.load_state_dict(state["optimizer"])
     start_epoch = state["epoch"]
@@ -208,8 +246,8 @@ for epoch in range(start_epoch, args.epochs):
     torch.manual_seed(args.seed + epoch)
     student.train()
     total_loss = 0.0
-    for images, _, indices in student_train_loader:
-        targets = torch.sigmoid(teacher_train[indices].to(DEVICE))
+    for images, labels, indices in student_train_loader:
+        targets = targets_for_batch(teacher_train[indices].to(DEVICE), labels.to(DEVICE))
         optimizer.zero_grad(set_to_none=True)
         loss = F.binary_cross_entropy_with_logits(student(images.to(DEVICE, non_blocking=True)), targets)
         loss.backward()
