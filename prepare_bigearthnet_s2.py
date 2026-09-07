@@ -21,6 +21,7 @@ parser.add_argument("--raw", type=Path, default=Path.home() / "data/bigearthnet-
 parser.add_argument("--spectralgpt-root", type=Path, default=Path.home() / "spectralgpt")
 parser.add_argument("--output", type=Path, default=None)
 parser.add_argument("--workers", type=int, default=16)
+parser.add_argument("--patch-list", type=Path, help="Convert patch IDs from this file instead of the official train/validation lists.")
 parser.add_argument("--limit", type=int, default=None, help="Convert only this many patches; use for a smoke test.")
 args = parser.parse_args()
 
@@ -33,13 +34,19 @@ if not raw.is_dir():
 if any(not split.is_file() for split in splits):
     raise SystemExit(f"Missing BigEarthNet split file under {root / 'txt_file'}")
 
-patches = []
-seen = set()
-for split in splits:
-    for patch in split.read_text().splitlines():
-        if patch and patch not in seen:
-            patches.append(patch)
-            seen.add(patch)
+if args.patch_list:
+    patch_list = args.patch_list.expanduser().resolve()
+    if not patch_list.is_file():
+        raise SystemExit(f"Missing patch list: {patch_list}")
+    patches = patch_list.read_text().splitlines()
+else:
+    patches = []
+    seen = set()
+    for split in splits:
+        for patch in split.read_text().splitlines():
+            if patch and patch not in seen:
+                patches.append(patch)
+                seen.add(patch)
 if args.limit:
     patches = patches[: args.limit]
 output.mkdir(parents=True, exist_ok=True)
