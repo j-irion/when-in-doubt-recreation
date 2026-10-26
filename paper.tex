@@ -1,0 +1,934 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{booktabs}
+\usepackage{multirow}
+\IEEEoverridecommandlockouts
+% The preceding line is only needed to identify funding in the first footnote. If that is unneeded, please comment it out.
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{makecell}
+\usepackage{adjustbox}
+\def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
+    T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
+\begin{document}
+
+\title{Learning with Less Data: Understanding Performance in Knowledge Distillation\\
+}
+
+%https://efficientaiworkshop.github.io/
+
+\author{
+	\IEEEauthorblockN{
+		Diellza Sherifi Iseni\IEEEauthorrefmark{1},
+		Julius Irion\IEEEauthorrefmark{1},
+		Francisco Mena\IEEEauthorrefmark{2},
+		Odej Kao\IEEEauthorrefmark{1}
+	}
+
+	\IEEEauthorblockA{
+		\IEEEauthorrefmark{1}
+		Technische Universität Berlin, Berlin, Germany\\
+		\{diellza.sherifi,irion,odej.kao\}@tu-berlin.de
+	}
+
+	\IEEEauthorblockA{
+		\IEEEauthorrefmark{2}
+		GFZ Helmholtz Centre for Geosciences, Potsdam, Germany \\
+		mena@gfz.de
+	}
+}
+
+\maketitle
+
+\begin{abstract}
+	Data used in remote sensing (RS) applications can be heterogeneous in terms of modalities, spatial resolution, and temporal resolution. This influences how models pretrained on natural images learn their data feature space. Many RS datasets can be challenging to learn, even for large geospatial foundation models (GeoFMs), and the use of such models can increase computational demands. Knowledge distillation (KD) reduces some of the burden by transferring knowledge from high-capacity models to smaller, more efficient student models, while coreset selection aims to reduce training costs by selecting smaller, representative subsets of the training data.
+	Therefore, we investigate how RS datasets that pose different challenges to different GeoFMs influence KD effectiveness and whether comparable performance can be achieved using only a subset of the data. At 75× reduction in model parameter count with training subsets as small as 10\% of the full dataset, our results show that higher teacher accuracy does not necessarily translate into better student performance.
+
+\end{abstract}
+
+\begin{IEEEkeywords}
+	Knowledge distillation, coreset selection, foundation models
+\end{IEEEkeywords}
+
+\section{Introduction}
+For vision transformers (ViT), scaling compute, model capacity, and dataset size together can improve representation quality and downstream performance~\cite{zhai2022scaling}.
+Foundation models for remote sensing (RS) applications such as TerraMind~\cite{jakubik2025terramind}, and %Prithvi~\cite{jakubik2023foundation},
+SSL4EO~\cite{wang2023ssl4eo} leverage this trend by pretraining models with millions of parameters on large, diverse RS datasets to learn general-purpose representations that can later be adapted to downstream tasks through fine-tuning. These general-purpose RS models may differ in their model size, spectral characteristics, and pre-training data sources, while downstream tasks can differ in their levels of semantic granularity~\cite{huo2025remote}. Such heterogeneity can contribute to variations in model performance across datasets and tasks, while increasing model size may improve performance, it also introduces higher computational demands during fine-tuning and inference~\cite{huo2025remote}.
+%while downstream tasks differ in their levels of semantic granularity.
+
+At the model level, knowledge distillation (KD) can address the high computational cost of such models by transferring the knowledge to a smaller student model, thus reducing model size and inference cost~\cite{mansourian2025comprehensive}.
+However, effective KD depends on factors such as the knowledge selected to transfer, the capacity, and the architectural gap between the teacher and student models~\cite{mansourian2025comprehensive}.
+More generally, model capacity can also determine how effective additional training data is~\cite{zhai2022scaling}, since large datasets can also increase resource requirements, and may contain redundant or noisy samples~\cite{nogueira2026core}.
+This is particularly relevant in RS applications, where datasets can contain large volumes of high-resolution and multi-temporal data~\cite{hashim2026coreset}.
+\begin{figure}[t]
+	\centering
+	\includegraphics[width=\columnwidth]{figures/dataset_comparison.png}
+	\caption{Characteristics of three remote sensing datasets, illustrated through pretrained TerraMind feature clustering and class distributions.}
+	\label{fig:figure1}
+\end{figure}
+
+At the dataset level, coreset selection provides a way to lower the burden by selecting a smaller subset of the dataset.
+%that preserves the most relevant information for the task.
+Specifically, reducing training data, training time, and training memory~\cite{hashim2026coreset}.
+The overall goal of coreset selection is to preserve the most relevant information for the task by capturing the distribution of the complete dataset through a smaller subset~\cite{hashim2026coreset,moser2025coreset}.
+%The key difference between selection methods is the signal of selecting the subset~\cite{moser2025coreset}.
+Across the literature on coreset selection, evaluations of the proposed methods have largely relied on established benchmark datasets, including natural image datasets such as CIFAR and ImageNet~\cite{moser2025coreset, mohanty2026enhancing, ben2024distilling}.
+In the remote sensing domain, model-agnostic coreset selection approaches have also been explored, highlighting the importance of selecting high-quality and representative samples for effective training~\cite{nogueira2026core}.
+%Model-agnostic coreset selection for remote sensing segmentation tasks emphasizes the importance of selecting high-quality and representative samples~\cite{nogueira2026core}.
+
+This motivates investigating how remote sensing data characteristics, particularly semantic complexity, class distribution, and feature separability, influence data-efficient learning across tasks, ranging from those that reach high performance to those that remain more challenging to learn.
+As summarized in Fig.~\ref{fig:figure1}, our observations across three remote sensing datasets using the same Sentinel-2 sensor modality and Geospatial Foundation Model (TerraMind) reveal differences in these characteristics and their learning behavior. In terms of semantic granularity, EuroSat contains relatively broad land-cover categories (coarse-grained), whereas So2Sat and TreeSatAI include more detailed class distinctions (fine-grained).
+
+Therefore, we connect coreset selection and knowledge distillation in remote sensing by investigating how training data interact with the large capacity gap between teachers and the student model during knowledge transfer. To this end, we analyze whether a smaller student model can retain sufficient task knowledge when trained only on a selected subset of the available data and how data characteristics contribute to the performance.
+%To this end, we compare knowledge distillation outcomes across equally sized subsets and analyze which data characteristics contribute to differences in student performance.
+%We examine how data characteristics such as semantic separability, class distribution, and sample heterogeneity contribute to differences in difficulty across remote sensing datasets, ranging from tasks that saturate quickly to those that remain more challenging to learn.
+
+
+\section{Related Work}
+A common focus in the literature is finding which method performs best for a given coreset selection setting. For example, Nogueira et al.~\cite{nogueira2026core} compare image-based, label-based, and hybrid coreset selection methods for remote sensing segmentation, showing that carefully selected subsets can outperform random sampling. Similarly, Hashim et al.~\cite{hashim2026coreset} compare clustering-based and gradient-based methods with a focus on computational efficiency. They propose K-CREST by combining both signals to preserve data diversity and training information during fine-tuning on remote sensing data.
+%Xiao et al. address the limitations of both pruning and dataset distillation by combining pruning, sample aggregation, and constrained augmentation to compress datasets using only hard labels.
+Guo et al.~\cite{guo2022deepcore} evaluate established coreset selection methods for deep learning models on natural images, showing that their effectiveness depends across experimental settings.
+Zhang et al.~\cite{zhang2023comparing} compare grouping-based, entropy-based, and direct sample selection methods across three remote sensing datasets for classification tasks. Their findings suggest that selecting representative samples based on pixel-value histograms achieves higher classification performance.
+
+In a complementary direction for learning with reduced data, Xu et al.~\cite{xu2026towards} explore a remote sensing dataset distillation by generating a compact synthetic training set for deep learning models.
+Similarly, Frank et al.~\cite{frank2025makes} investigate synthetic surrogate datasets as an alternative to the original training data. Their focus is on knowledge distillation, where they identify key data characteristics that enable effective knowledge transfer from teacher to student.
+Ben-Baruch et al.~\cite{ben2024distilling} then study knowledge distillation on pruned datasets, using teacher-generated soft predictions to guide student training after data reduction.
+Focusing on teacher guidance for the selection of the coreset, Mohanty et al.~\cite{mohanty2026enhancing} propose using teacher-generated soft labels as a signal for existing selection methods. These soft labels provide additional information about sample confidence and class relationships, leading to more informative subsets.
+Dey et al.~\cite{dey2026rethinking} compare several dataset-distillation methods and find out that high-quality coresets do not consistently outperform random subsets under soft-label supervision, whereas the quality of coreset selection has a greater impact under hard-label supervision.
+
+While the existing coreset selection methods have explored data-efficient fine-tuning and, in combination with knowledge distillation, our goal is to investigate whether selected subsets remain effective for knowledge distillation in domain-specific settings such as remote sensing. Specifically, we evaluate this across datasets ranging from lower learning difficulty to more challenging tasks and analyze the factors that influence distillation performance.
+
+%They apply knowledge distillation after data pruning, using a teacher trained on the full dataset to guide student learning on the reduced subset. The study is primarily evaluated on natural image classification datasets. Their study is limited to natural image classification and does not investigate whether the selected subsets are also effective for knowledge distillation or in domain-specific settings such as remote sensing.
+
+%https://arxiv.org/pdf/2411.12817?
+%Frank et al. Proposes demonstrate that using unnatural synthetic imagery can serve as a suitable alternative in knowledge distillation. Data-Free Knowledge Distillation, transfer teacher network statistics to synthesize examples. They used easy datasets such as EuroSat, Cifar etc
+%Propose a hybrid approach of combined K-Means clustering with gradient-based selection (K-CREST). They use Sen4Map dataset for mapping and environmental monitoring. They compared random sampling, clustering-based methods, gradient-based selection and propose the hybrid approach
+%https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=11641456
+%Nogueira et al. show that model-agnostic coreset selection methods for remote sensing segmentation can outperform random subsets, highlighting the importance of data quality and representativeness.
+%They benchamark DFC2022 dataset. Their main focus is segmentation.They introduce and benchmark six model-agnostic core-set selection approaches for remote sensing image segmentation.
+%https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=11368852
+%In contrast, Xu et al. address remote sensing dataset distillation by generating a compact synthetic training set for training deep learning models. Their goal is to preserve the key representative and discriminative information of the original data.
+%Data distillation in the field of remote sensing images. The idea is generating a small number of representative synthetic samples to replace the original large-scale training set to train the deep learning models to reduce data storage and computing cost while maintaining model performance. Dataset augmentation aims to expand training set to improve robustness, dataset distillation aims to indetify the distilled essence or minimal set of synthetic samples required for a model to learn effectively. Compared to natural images, RS cover rich complex object categories, show diverse imaging conditions, visual styles and semantic context making it difficult to generate distilled samples that are discriminative and diverse. They propose DPD model for RS datasets distillation which introduces classifier-driven guidance.
+%https://arxiv.org/pdf/2601.15829v1
+%Mohanty et al. assume that soft labels offer a superior signal for the coreset selection process. Downstream performance improves across various architectures and selection budgets. And this prevents selection of reduntant or outlier samples. Many types of this coreset selection. They also ues easy dataet such as CiFAR, Imagenet versions. So they take soft labels such as probabilty for each class for an image and then compare samples using all information. So they select those with more information on the probability so with more similar decision boundary. So they take typical methods and introduce soft-labels instead of hard core.
+%https://openaccess.thecvf.com/content/CVPR2026W/DataCV/papers/Mohanty_Enhancing_Coreset_Selection_Via_Teacher-Guided_Soft_Labels_CVPRW_2026_paper.pdf
+%Similarly, they use soft predictions from teacher network. Their motivation is is a teacher model trained on complete dataset captures essentail information and core statistics about the entire data. So then they use this knowledge when training on pruned subsets. They investigate KD in context of data pruning. Their focus is self-distillation with teacher-student in identical architectures. Datapruning is coreset selection. their method is prune dataset firs, then use kd to recover info lost by pruning. The previous paper uses teacher information to help select the coreset, this paper they select the coreset firs then use teacher information to train better on that subset.
+%https://arxiv.org/pdf/2403.07854?
+%This also focuses on image quality and propose using soft labels instead of hard labels. it is more for distillation data.
+%https://arxiv.org/pdf/2502.06434?
+
+\section{Experimental Setup}
+%Use the teacher to see the trained images again and connect them somehow to the val set. So teacher training img features and then see what falls with the val set.
+%\textbf{Datasets}. We investigate Eurosat as a fast converging dataset, So2Sat, and TreeSat as harder to learn.
+
+\textbf{Models}. We investigate TerraMind-large, SSL4EO-large and DOFA as teachers, while Mobilenet as student.
+
+\textbf{TerraMind} uses a Transformer encoder--decoder with dual-scale pixel- and token-level representations and is designed for multimodal Earth observation (EO) learning. Its inputs include Sentinel-1 (S1), Sentinel-2 (S2), DEM, NDVI, LULC, geolocation, and text. Its main purpose is to learn relationships across heterogeneous EO modalities and support any-to-any generation.
+
+\textbf{DOFA} is a ViT-based architecture with wavelength-conditioned dynamic layers. It accepts images with arbitrary channel configurations together with their corresponding wavelengths. Its main purpose is to provide robustness across sensors, modalities, and different spectral band configurations.
+
+\textbf{SSL4EO-S12} is a large-scale Sentinel-1/2 self-supervised pretraining framework rather than a single architecture. Its MAE variants use ViT-S/B/L/H backbones, while other variants employ architectures such as ResNet under different self-supervised objectives. Optical models typically use 13-band Sentinel-2 L1C imagery, while separate models operate on 2-band Sentinel-1 SAR data. Its main purpose is to learn transferable representations through large-scale Sentinel-specific self-supervised pretraining.
+
+\textbf{Mobilenet} is a lightweight CNN that uses inverted residual blocks and depthwise separable convolutions to reduce computational complexity.
+%\textbf{SpectralGPT:} SpectralGPT is a 3D generative Transformer designed for spectral remote-sensing imagery. It explicitly models spatial and spectral relationships within multispectral inputs and is pretrained using masked spectral-spatial reconstruction. Its main purpose is to learn transferable spectral-spatial representations.
+
+\textbf{KD setup.} Inputs are resized to \(224\times224\), followed by band selection, normalization, and padding, without explicit data augmentation. The student is trained for 50 epochs with batch size 8 using AdamW (\(lr=10^{-4}\), weight decay \(=0.05\)) and a multistep schedule reducing the learning rate to \(10^{-5}\) and \(10^{-6}\) at 60\% and 90\% of training. We consider two knowledge distillation (KD) settings: soft-target-only KD (\(\alpha=0\)), which relies exclusively on teacher predictions, and mixed KD (\(\alpha=0.5\)), which combines teacher soft targets and ground-truth hard labels with equal weighting. Both settings use a temperature of \(T=8\), without confidence filtering or feature-level losses. A single seed controls model initialization, batch ordering, DataLoader workers, and PyTorch/CUDA/NumPy/Python random states, with deterministic cuDNN enabled. The checkpoint with the highest validation accuracy is selected and evaluated on the held-out test set.
+
+\textbf{Coreset setup.} Cosine similarity and soft-ouput diversity.
+
+%textbf{Evaluation metrics}. We evaluate classification performance using accuracy. To assess representation quality, we use the cosine silhouette score to measure class separability and kNN Top-1 and Top-2 accuracy to evaluate the discriminative quality of features extracted by the pretrained foundation models.
+%We split the datasets into distinct partitions. We used one seed for initialization, for training etc. For So2Sat seed 234 we see at test 31.3 to 38.0. For seed 405 we have 34.7 to 40.5. For seed 612 we have 32.8 to 41.6, We might need to test random init on full dataset KD. So Full dataset KD at different seeds, then at different init and training sed. We tested for so2sata KD on 2k vs supervised. KD wins 5/9 folds. We checked the classes test accuracy: 12/17 are above 50 for teacher. We checked the classes test accuracy KD for folds: 5/17, 4/17, 4, 5, 3, 2, 5, 4, 4. For supervised: 5/17, 2/17, 4, 6, 2, 4, 3, 4, 4. We did fixed initialization and diff training seed:
+
+\section{Results and Analysis}
+
+Our analysis of model- and data-efficient learning strategies focuses on two aspects. First, how knowledge distillation performance changes as the training dataset size decreases. Second, how dataset characteristics and training data selection influence the effectiveness of knowledge transfer.
+% Mean accuracy: 7 pt
+\newcommand{\meanval}[1]{%
+	{\fontsize{9}{9}\selectfont #1}%
+}
+% Mean: 7 pt, ± standard deviation: 6 pt
+\newcommand{\meanstd}[2]{%
+	\mbox{%
+		{\fontsize{9}{9}\selectfont #1}%
+		\hspace{1pt}%
+		{\fontsize{8}{8}\selectfont $\pm\,#2$}%
+	}%
+}
+
+\begin{table*}[!t]
+	\centering
+	\caption{Test accuracy (\%) of teacher and student models
+		using the full training dataset (100\%) and randomly
+		reduced subsets (50\% and 10\%). Reduced-subset
+		results are reported as mean $\pm$ standard deviation.
+		KD denotes knowledge distillation, while S denotes
+		supervised student training without KD.}
+	\label{tab:kd_comparison}
+
+	\footnotesize
+	\setlength{\tabcolsep}{4pt}
+	\renewcommand{\arraystretch}{1.25}
+
+	\begin{tabular*}{\textwidth}{
+			@{\extracolsep{\fill}}llcccccccc@{}
+		}
+		\toprule
+
+		\multirow{2}{*}{\textbf{Dataset}} &
+		\multirow{2}{*}{\textbf{Teacher}} &
+		\multicolumn{4}{c}{\textbf{Full Dataset (100\%)}} &
+		\multicolumn{2}{c}{\textbf{50\% Subsets}} &
+		\multicolumn{2}{c}{\textbf{10\% Subsets}} \\
+
+		\cmidrule(lr){3-6}
+		\cmidrule(lr){7-8}
+		\cmidrule(lr){9-10}
+
+		& &
+		\textbf{T Acc.} &
+		\textbf{KD$_0$} &
+		\textbf{KD$_{0.5}$} &
+		\textbf{S} &
+		\textbf{KD$_0$} &
+		\textbf{S} &
+		\textbf{KD$_0$} &
+		\textbf{S} \\
+
+		\midrule
+
+		% =====================================
+		% EUROSAT
+		% =====================================
+
+		\multirow{3}{*}{EuroSAT}
+		& TerraMind
+		& \meanval{98.8}
+		& \meanval{\textbf{97.7}}
+		& \meanval{\textbf{97.6}}
+		& \multirow{3}{*}{\meanval{96.6}}
+		& \meanstd{\textbf{96.4}}{0.0}
+		& \multirow{3}{*}{\meanstd{94.8}{0.1}}
+		& \meanstd{86.9}{0.9}
+		& \multirow{3}{*}{\meanstd{83.9}{1.1}} \\
+
+		& SSL4EO
+		& \meanval{98.3}
+		& \meanval{96.3}
+		& \meanval{96.8}
+		&
+		& \meanstd{95.2}{0.3}
+		&
+		& \meanstd{\textbf{87.8}}{1.0}
+		& \\
+
+		& DOFA
+		& \meanval{\textbf{98.9}}
+		& \meanval{97.6}
+		& \meanval{96.8}
+		&
+		& \meanstd{96.0}{0.6}
+		&
+		& \meanstd{86.1}{0.9}
+		& \\
+
+		\midrule
+
+		% =====================================
+		% SO2SAT
+		% =====================================
+
+		\multirow{3}{*}{So2Sat}
+		& TerraMind
+		& \meanval{59.0}
+		& \meanval{47.8}
+		& \meanval{49.1}
+		& \multirow{3}{*}{\meanval{49.1}}
+		& \meanstd{44.6}{1.3}
+		& \multirow{3}{*}{\meanstd{43.4}{0.3}}
+		& \meanstd{\textbf{36.8}}{2.6}
+		& \multirow{3}{*}{\meanstd{33.9}{2.0}} \\
+
+		& SSL4EO
+		& \meanval{58.9}
+		& \meanval{\textbf{56.0}}
+		& \meanval{\textbf{57.7}}
+		&
+		& \meanstd{\textbf{49.2}}{1.3}
+		&
+		& \meanstd{36.6}{1.1}
+		& \\
+
+		& DOFA
+		& \meanval{\textbf{59.5}}
+		& \meanval{49.1}
+		& \meanval{50.0}
+		&
+		& \meanstd{47.8}{0.2}
+		&
+		& \meanstd{34.7}{1.6}
+		& \\
+
+		\midrule
+
+		% =====================================
+		% TREESATAI
+		% =====================================
+
+		\multirow{3}{*}{TreeSatAI}
+		& TerraMind
+		& \meanval{\textbf{57.3}}
+		& \meanval{52.3}
+		& \meanval{50.2}
+		& \multirow{3}{*}{\meanval{47.7}}
+		& \meanstd{47.5}{0.6}
+		& \multirow{3}{*}{\meanstd{44.8}{0.7}}
+		& \meanstd{39.2}{2.7}
+		& \multirow{3}{*}{\meanstd{35.5}{2.1}} \\
+
+		& SSL4EO
+		& \meanval{56.8}
+		& \meanval{52.6}
+		& \meanval{52.7}
+		&
+		& \meanstd{47.2}{1.5}
+		&
+		& \meanstd{\textbf{41.1}}{1.0}
+		& \\
+
+		& DOFA
+		& \meanval{55.4}
+		& \meanval{\textbf{53.6}}
+		& \meanval{\textbf{52.9}}
+		&
+		& \meanstd{\textbf{50.1}}{0.9}
+		&
+		& \meanstd{39.1}{1.6}
+		& \\
+
+		\bottomrule
+	\end{tabular*}
+
+	\vspace{0.5em}
+
+	\begin{minipage}{\textwidth}
+		\footnotesize
+		\textit{Note:} T Acc. denotes teacher accuracy.
+		KD$_0$ and KD$_{0.5}$ denote knowledge
+		distillation with $\alpha=0$ and $\alpha=0.5$,
+		respectively.
+	\end{minipage}
+
+\end{table*}
+
+\subsection{Data Reduction in Knowledge Distillation}
+
+We compare the performance of fine-tuned teachers and distilled students under two KD configurations (\(\alpha=0\) and \(\alpha=0.5\)). We then investigate the effect of randomly reducing the training data to 10\% and 50\% during distillation.
+The left section of Table~\ref{tab:kd_comparison} summarizes the classification performance across remote sensing datasets, comparing three GeoFM teachers and a single student architecture.
+%under two KD configurations $\alpha=0$ and $\alpha=0.5$, alongside the supervised student baseline.
+Fine-tuning GeoFMs that differ in their architectural characteristics and pretraining strategies on the same dataset shows comparable performance on EuroSat (98.3--98.9\%) and So2Sat (58.9--59.5\%), with maximum differences of 0.6 percentage points (pp). On TreeSatAI there is higher variation across teachers, with accuracies ranging from 55.4\% to 57.3\% (1.9 pp).
+
+On EuroSat, soft-target-only KD ($\alpha=0$) produces similar student performance across teachers, with a maximum difference of 1.4 pp. Compared to fine-tuned teachers, distillation results in slightly lower accuracy, with the largest reduction of 2 pp observed for SSL4EO.
+Incorporating hard-label supervision ($\alpha=0.5$) shows comparable performance to soft-target-only ($\alpha=0$) KD, with the largest decrease of 0.8 pp observed for DOFA. The supervised student also achieves comparable performance with a maximum gap of 1 pp.
+
+On So2Sat, soft-target-only KD leads to larger performance reductions relative to the fine-tuned teachers, reaching maximum 11.2 pp for TerraMind. The student trained from SSL4EO has the lowest performance difference (2.9 pp). Incorporating hard labels improves student accuracy across all teachers. Compared to the supervised baseline, training the student with SSL4EO as a teacher reaches the best performance with both soft and hard label targets (+6.9 and +8.6 pp). The rest of the students trained with the other two teachers remain comparable to the supervised learning.
+
+On TreeSatAI, soft-target-only KD results in a maximum accuracy reduction of 5 pp relative to the teachers, observed for TerraMind. Incorporating hard-label supervision leads to further reductions of up to 2.1 pp compared with soft-target-only KD. Overall, all distilled students achieve higher performance compared to the supervised baseline.
+
+The right side of Table~\ref{tab:kd_comparison} presents the effect of reducing the training data to 50\% and 10\% on student performance, comparing soft-target distillation ($\alpha=0$) with supervised training without KD.
+Reducing the training data to 50\% results in relatively small accuracy reductions on EuroSat, ranging from 1.1 to 1.6 pp across the three KD teachers, and 1.8 pp for the supervised student. Greater variability is noticed across So2Sat and TreesatAI. So2Sat shows reductions from 1.3 to 6.8 pp with KD, compared with 5.7 pp for the supervised student. TreeSatAI, reductions range from 3.5 to 5.4 pp, while the supervised student experiences a 2.9 pp decrease.
+The performance trend follows similarly as the full dataset student distilled.
+Compared to supervised training, KD improves student performance across all settings, with the largest gain of 5.8 pp observed for SSL4EO on So2Sat.
+
+When using only 10\% of randomly selected training data, KD performance declines substantially across all datasets compared to full-data KD. On EuroSat, KD accuracy decreases by 8.5--11.5 pp,  while supervised training decreases by 12.7 pp. On So2Sat, KD accuracy reduces by 11.0--9.4 pp, while supervised training accuracy shows a decrease of 15.2 pp. Similarly, on TreeSatAI, KD accuracy decreases by 11.5--14.5 pp, while supervised training shows a decrease of 12.2 pp. Compared to supervised training, KD improves student performance across all settings, with the largest gain of 5.6 pp observed for SSL4EO on TreeSatAI.
+
+
+\begin{figure*}[t]
+	\centering
+	\includegraphics[width=0.95\linewidth]{figures/normalize.png}
+	\caption{Comparison of kNN Top-1 accuracy and cosine silhouette before and after fine-tuning across three remote sensing datasets and three GeoFMs. $\Delta$ Cos and $\Delta$ kNN denote the improvements in cosine silhouette and kNN accuracy after fine-tuning, respectively.}
+	\label{fig:representation}
+\end{figure*}
+
+
+\subsection{Understanding Teacher Behavior}
+
+To analyze the differences in distillation performance across datasets, we evaluate the quality of feature representations before and after teacher model adaptation.
+%We evaluate class separability using the cosine silhouette score and the discriminative quality of representations using kNN Top-1 and Top-2 accuracy.
+Figure~\ref{fig:representation} presents the representation quality before and after model adaptation on the held-out test sets.
+We investigate whether individual samples can be correctly classified based on their nearest neighbors in feature space (kNN) and whether samples belonging to the same class form distinct, well-separated groups (cosine silhouette).
+
+Before fine-tuning, cosine silhouette scores are overall low across all datasets, while kNN is higher on EuroSat than on So2Sat and TreeSatAI. After fine-tuning, EuroSat reaches kNN accuracy above 95\% and cosine silhouette scores ranging from 0.65 to 0.8. Both metrics improve on So2Sat, where kNN accuracy reaches approximately 60\%, and cosine silhouette score reaches 0.57. Similarly, TreeSatAI achieves approximately 58\% kNN accuracy and a cosine silhouette score of 0.52.
+These results suggest that EuroSat exhibits higher class separability even before fine-tuning, whereas So2Sat and TreeSatAI remain more challenging, with higher overlap between classes despite improvements in their learned representations.
+%kNNtop1 top2 shows if the samples belonging to the same class are close together in feature space. top 1 highest-ranked predicted class is correct, top 2 whch correct class appears among the two highest ranked predicted class. top 1 ability to identify correct class as the first prediction, top 2 amon the first two. Cosine shows how well classes are separated in feature space (1 0 -1) 1 well separated 0 overlaping, -1 samples are on average closer to another class than their own. On Eurosat, all three models have high KNN before finetuning and lower cosine silhouette.
+Furthermore, the trends in KNN and cosine silhouette scores are consistent with the classification accuracy of the fine-tuned teacher models, suggesting that model performance tends to match the level of feature separability and clustering across datasets.
+
+
+\subsection{Effects of Teacher-Guided Coreset Selection}
+
+Following the analysis of teacher representations, we evaluate whether teacher-guided coreset selection improves knowledge distillation performance compared to random data selection when using only 10\% of the training data. Table~\ref{tab:coreset_results} shows the random selection results reported in Table~\ref{tab:kd_comparison} against two teacher-guided selection strategies: highest feature separability (Cosine silhouette CS) and diverse teacher representations (soft-output diversity SP).
+
+Distilling the students on data selected based on the highest cosine silhouette scores results in lower performance across all settings, except for TreeSatAI. For this dataset, the distilled students achieve comparable performance. DOFA as a teacher outperforms random data selection by 1.4 pp, while overall SSL4EO with random selection remains the best at 41.1\%.
+In EuroSat and So2Sat, selecting samples with highly separable features negatively affects the knowledge transfer across all models with reductions from 8.4--11.7, and 5.3--6.3 pp, respectively.
+Soft-output diversity-based selection achieves performance comparable to random selection on EuroSat with differences of 0.4--1.4 pp, while showing slightly lower performance on TreeSatAI by 0.5--2.5 pp.
+In contrast, performance improves across all three teacher-dervied student models on So2Sat by 2.2--3.0 pp.
+Furthermore, the standard deviations observed under random data selection indicate variability in student performance across different training subsets, particularly on So2Sat and TreeSatAI.
+
+
+\newcommand{\acc}[1]{\meanval{#1}}
+
+\begin{table}[t]
+	\centering
+	\caption{Student test accuracy (\%, mean $\pm$ standard
+		deviation) using different 10\% coreset selection methods.
+		SP denotes soft-output probability-based selection.}
+	\label{tab:coreset_results}
+
+	\setlength{\tabcolsep}{4pt}
+	\renewcommand{\arraystretch}{1.15}
+
+	\begin{tabular}{llccc}
+		\toprule
+		\textbf{Dataset} &
+		\textbf{Teacher} &
+		\textbf{Random}  &
+		\textbf{CS}      &
+		\textbf{SP}                                                                                     \\
+		\midrule
+
+		\multirow{3}{*}{EuroSat}
+		                 & TerraMind & \meanstd{\textbf{86.9}}{ 0.9} & \acc{77.4} & \acc{86.5}          \\
+		                 & SSL4EO    & \meanstd{87.8}{1.0}           & \acc{79.4} & \acc{86.4}          \\
+		                 & DOFA      & \meanstd{86.1}{0.9}           & \acc{74.4} & \acc{85.5}          \\
+
+		\midrule
+
+		\multirow{3}{*}{So2Sat}
+		                 & TerraMind & \meanstd{36.8}{2.6}           & \acc{31.2} & \acc{\textbf{39.0}} \\
+		                 & SSL4EO    & \meanstd{36.6}{1.1}           & \acc{30.3} & \acc{38,8}          \\
+		                 & DOFA      & \meanstd{34.7}{1.6}           & \acc{29.4} & \acc{37.7}          \\
+
+		\midrule
+
+		\multirow{3}{*}{TreeSatAI}
+		                 & TerraMind & \meanstd{39.2}{2.7}           & \acc{38.0} & \acc{38.0}          \\
+		                 & SSL4EO    & \meanstd{\textbf{41.1}}{1.0}  & \acc{39.2} & \acc{38.6}          \\
+		                 & DOFA      & \meanstd{39.1}{1.6}           & \acc{40.5} & \acc{38.6}          \\
+
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+
+
+\subsection{Discussion}
+
+The observed differences in student performance across different settings highlight the importance of dataset characteristics in knowledge distillation.
+Better task-adapted teacher representation and higher teacher accuracy does not necessarily translate into better knowledge distillation performance, and reducing the training data has different effects across datasets.
+These observations suggest that knowledge transfer depends not only on teacher performance but also could depend on dataset characteristics and training data selection.
+
+Selecting samples with highly separable features may limit data diversity and negatively affect knowledge transfer in datasets with higher feature separability. In contrast, such selection may be beneficial in datasets with less separable representations.
+%These observations suggest that selecting highly separable samples may reduce data diversity and limit knowledge transfer. However, the effectiveness of this strategy may depend on the underlying dataset characteristics, including feature separability.
+The variability observed in distilled student performance under random data selection is sensitive to the selected training subset, particularly on more challenging datasets. This could be due to the differences in how well teacher models capture dataset characteristics and how effective this knowledge is transferred through the selected samples. These findings suggest that teacher-guided coreset selection may offer a more consistent alternative.
+
+Further evaluation on additional remote sensing datasets with similar characteristics could strengthen the findings. Moreover, differences in subset performance may be influenced by the use of a single lightweight student architecture without remote sensing pretraining. We also do not consider teacher--student similar architecture pair and differences in model capacity may further influence the knowledge transfer.
+
+%Comparing KD performance across the full datasets reveals that the highest-performing teacher does not always produce the best distilled student. TerraMind and DOFA achieve comparable student performance on EuroSat, while SSL4EO is best on So2Sat, and DOFA on TreeSatAI. Incorporating hard labels could further improve student performance, depending on the setting. When the training data is reduced to 50\%, the best-performing teacher remains the same as with the full dataset. However, at 10\% the best-performing teacher changes across all three datasets, with SSL4EO performing best on EuroSat, TerraMind on So2Sat, and SSL4EO on TreeSatAI. Compared to supervised training, knowledge distillation generally improves student performance, although not consistent across all settings. There is a higher impact when data is reduced to 10\%, which could indicate the teacher knowledge helps when less data is used. This suggests that better task-adapted teacher representations and higher teacher accuracy do not necessarily translate into better knowledge distillation performance. Because KD is done on soft labels, the teacher predictive accuracy alone does not determine how effectively a student learns from its output distributions.
+
+\section{Conclusion}
+
+Remote sensing data and tasks differ in characteristics, bands, and sensor modality, while GeoFMs vary in their pretraining strategy and architecture setting. Our findings show that knowledge distillation to a smaller student could work with less data, but performance varies substantially across datasets and teacher settings. We study whether this variation is explained by subset composition, teacher-derived signals, and initialization, and identify which factors make limited-data KD more reliable.
+
+Strong teacher performance from a high-capacity model does not necessarily translate into effective knowledge to transfer.
+Furthermore, randomly reducing the training data size for the student further reduces performance.
+Selecting samples with highly separable features does not consistently improve knowledge distillation under limited data. In contrast, soft-output diversity-based selection achieves comparable performance in some settings and improvements in others. These findings highlight the importance of considering dataset characteristics and training data selection when applying data-efficient knowledge distillation.
+
+Future work could extend the evaluation to additional remote sensing datasets and tasks, explore different sizes of student architectures with remote sensing pretraining, and investigate whether additional teacher-guided coreset selection strategies can reach similar performance to the teacher.
+
+\section{Acknowledgment}
+Funded by the Deutsche Forschungsgemeinschaft (DFG) – Project-ID 414984028 – SFB 1404 FONDA.
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+\end{document}
+
+
+
+\begin{table}[t]
+	\centering
+	\caption{Student test accuracy (\%, mean $\pm$ standard
+		deviation) using reduced training subsets.}
+	\label{tab:subset_results}
+
+	\scriptsize
+	\setlength{\tabcolsep}{2pt}
+	\renewcommand{\arraystretch}{1.15}
+
+	\resizebox{\columnwidth}{!}{%
+		\begin{tabular}{llcccc}
+			\toprule
+
+			\multirow{2}{*}{Dataset}        &
+			\multirow{2}{*}{Teacher}        &
+			\multicolumn{2}{c}{10\% Subset} &
+			\multicolumn{2}{c}{50\% Subset}                                           \\
+
+			\cmidrule(lr){3-4}
+			\cmidrule(lr){5-6}
+
+			                                &           & KD   & No KD & KD   & No KD \\
+			\midrule
+
+			\multirow{3}{*}{EuroSAT}
+			                                & TerraMind & 83.6 & 84.9  & 94.2 & 94.9  \\
+			                                & SSL4EO    & 82.8 & 84.9  & 93.5 & 94.9  \\
+			                                & DOFA      & 80.9 & 84.9  & 94.5 & 94.9  \\
+
+			\midrule
+
+			\multirow{3}{*}{So2Sat}
+			                                & TerraMind & 37.9 & 35.0  & 42.4 & 43.2  \\
+			                                & SSL4EO    & 37.0 & 35.0  & 43.6 & 43.2  \\
+			                                & DOFA      & 33.6 & 35.0  & 43.2 & 43.2  \\
+
+			\midrule
+
+			\multirow{3}{*}{TreeSatAI}
+			                                & TerraMind & 34.8 & 30.7  & 43.9 & 44.3  \\
+			                                & SSL4EO    & 29.9 & 30.7  & 44.3 & 44.3  \\
+			                                & DOFA      & 39.4 & 30.7  & 47.9 & 44.3  \\
+
+			\bottomrule
+		\end{tabular}%
+	}
+
+	\vspace{2pt}
+	\parbox{\columnwidth}{\scriptsize
+		\textit{Note:} Results are reported as mean
+		$\pm$ standard deviation. KD denotes knowledge
+		distillation; No KD denotes supervised training.
+	}
+
+\end{table}
+
+
+
+
+\begin{table}[t]
+	\centering
+	\caption{Student test accuracy (\%, mean $\pm$ standard
+		deviation) using reduced training subsets.}
+	\label{tab:subset_results}
+
+	\scriptsize
+	\setlength{\tabcolsep}{2pt}
+	\renewcommand{\arraystretch}{1.15}
+
+	\resizebox{\columnwidth}{!}{%
+		\begin{tabular}{llcccc}
+			\toprule
+
+			\multirow{2}{*}{Dataset}        &
+			\multirow{2}{*}{Teacher}        &
+			\multicolumn{2}{c}{50\% Subset} &
+			\multicolumn{2}{c}{10\% Subset}                                                                                         \\
+
+			\cmidrule(lr){3-4}
+			\cmidrule(lr){5-6}
+
+			                                &                                   & KD ($\alpha=0$) & No KD & KD ($\alpha=0$) & No KD \\
+			\midrule
+
+			\multirow{3}{*}{EuroSAT}
+			                                & TerraMind
+			                                & 94.5 $\pm$ 0.0\%
+			                                & \multirow{3}{*}{94.8 $\pm$ 0.1\%}
+			                                & 83.4 $\pm$ 1.0\%
+			                                & \multirow{3}{*}{83.9 $\pm$ 1.1\%}                                                     \\
+
+			                                & SSL4EO
+			                                & 94.0 $\pm$ 0.8\%
+			                                &
+			                                & 84.6 $\pm$ 0.9\%
+			                                &                                                                                       \\
+
+			                                & DOFA
+			                                & 94.6 $\pm$ 0.1\%
+			                                &
+			                                & 83.0 $\pm$ 1.3\%
+			                                &                                                                                       \\
+
+			\midrule
+
+			\multirow{3}{*}{So2Sat}
+			                                & TerraMind
+			                                & 44.5 $\pm$ 0.6\%
+			                                & \multirow{3}{*}{43.4 $\pm$ 0.3\%}
+			                                & 33.7 $\pm$ 1.8\%
+			                                & \multirow{3}{*}{33.9 $\pm$ 2.0\%}                                                     \\
+
+			                                & SSL4EO
+			                                & 44.6 $\pm$ 1.4\%
+			                                &
+			                                & 34.7 $\pm$ 2.0\%
+			                                &                                                                                       \\
+
+			                                & DOFA
+			                                & 43.1 $\pm$ 1.1\%
+			                                &
+			                                & 33.0 $\pm$ 2.4\%
+			                                &                                                                                       \\
+
+			\midrule
+
+			\multirow{3}{*}{TreeSatAI}
+			                                & TerraMind
+			                                & 43.8 $\pm$ 3.2\%
+			                                & \multirow{3}{*}{44.8 $\pm$ 0.7\%}
+			                                & 35.4 $\pm$ 2.3\%
+			                                & \multirow{3}{*}{35.5 $\pm$ 2.1\%}                                                     \\
+
+			                                & SSL4EO
+			                                & 43.3 $\pm$ 1.5\%
+			                                &
+			                                & 35.0 $\pm$ 2.5\%
+			                                &                                                                                       \\
+
+			                                & DOFA
+			                                & 46.9 $\pm$ 1.4\%
+			                                &
+			                                & 37.4 $\pm$ 1.8\%
+			                                &                                                                                       \\
+
+
+			\bottomrule
+		\end{tabular}%
+	}
+
+	\vspace{2pt}
+	\parbox{\columnwidth}{\scriptsize
+		\textit{Note:} Results are reported as mean
+		$\pm$ standard deviation. KD denotes knowledge
+		distillation; No KD denotes supervised training.
+	}
+
+\end{table}
+
+
+
+
+\begin{table*}[t]
+	\centering
+	\caption{Representation quality before and after model
+		adaptation, evaluated using kNN Top-1 and Top-2 accuracy
+		(\%) and cosine silhouette score.}
+	\label{tab:representation_comparison}
+
+	\small
+	\setlength{\tabcolsep}{5pt}
+	\renewcommand{\arraystretch}{1.12}
+
+	\begin{tabular*}{\textwidth}{
+			@{\extracolsep{\fill}}llcccccc@{}}
+		\toprule
+
+		\multirow{2}{*}{Dataset} &
+		\multirow{2}{*}{Model} &
+		\multicolumn{2}{c}{kNN Top-1 (\%)} &
+		\multicolumn{2}{c}{kNN Top-2 (\%)} &
+		\multicolumn{2}{c}{Cosine Silhouette} \\
+
+		\cmidrule(lr){3-4}
+		\cmidrule(lr){5-6}
+		\cmidrule(lr){7-8}
+
+		& & Before & After & Before & After
+		& Before & After \\
+
+		\midrule
+
+
+		\multirow{4}{*}{EuroSAT-MS}
+		& TerraMind-L & 80.9 & 98.3 & 92.9 & 99.9 & 0.064 & 0.356 \\
+		& DOFA ViT-L/16 & 85.1 & 99.9 & 95.6 & 100.0 & 0.112 & 0.619 \\
+		& SSL4EO ViT-L/16 & 74.4 & 99.1 & 89.2 & 100.0 & 0.012 & 0.368 \\
+		& MobileNet (Sup.) & 60.7 & 99.8 & 79.1 & 100.0 & -0.089 & 0.626 \\
+
+		\midrule
+
+
+		\multirow{4}{*}{m-So2Sat}
+		& TerraMind-L & 68.0 & 97.2 & 85.0 & 99.3 & -0.059 & 0.217 \\
+		& DOFA ViT-L/16 & 70.7 & 99.1 & 87.9 & 99.9 & 0.052 & 0.403 \\
+		& SSL4EO ViT-L/16 & 53.7 & 87.3 & 73.1 & 96.6 & -0.292 & 0.141 \\
+		& MobileNet (Sup.) & 43.7 & 89.7 & 61.1 & 97.3 & -0.239 & 0.221 \\
+
+		\midrule
+
+
+		\multirow{4}{*}{TreeSatAI}
+		& TerraMind-L & 39.3 & 88.5 & 55.5 & 96.7 & -0.144 & 0.101 \\
+		& DOFA ViT-L/16 & 38.4 & 82.5 & 55.4 & 93.2 & -0.107 & 0.116 \\
+		& SSL4EO ViT-L/16 & 34.4 & 97.7 & 50.6 & 99.5 & -0.323 & 0.229 \\
+		& MobileNet (Sup.) & 29.6 & 61.5 & 43.7 & 77.8 & -0.183 & 0.041 \\
+
+		\bottomrule
+	\end{tabular*}
+
+	\vspace{3pt}
+	\parbox{\textwidth}{\footnotesize
+		\textit{Note:} Before and After refer to representations
+		before and after task-specific fine-tuning for teacher
+		models, and before and after supervised training for
+		MobileNet. kNN Top-1 and Top-2 are reported as
+		percentages; cosine silhouette is unitless.
+	}
+
+\end{table*}
+
+% Required packages in preamble
+
+\begin{table*}[t]
+	\centering
+	\caption{Representation quality before and after model
+		adaptation, evaluated using kNN Top-1 and Top-2 accuracy
+		(\%) and cosine silhouette score.}
+	\label{tab:representation_comparisontest}
+
+	\small
+	\setlength{\tabcolsep}{5pt}
+	\renewcommand{\arraystretch}{1.12}
+
+	\begin{tabular*}{\textwidth}{
+			@{\extracolsep{\fill}}llcccccc@{}}
+		\toprule
+
+		\multirow{2}{*}{Dataset} &
+		\multirow{2}{*}{Model} &
+		\multicolumn{2}{c}{kNN Top-1 (\%)} &
+		\multicolumn{2}{c}{kNN Top-2 (\%)} &
+		\multicolumn{2}{c}{Cosine Silhouette} \\
+
+		\cmidrule(lr){3-4}
+		\cmidrule(lr){5-6}
+		\cmidrule(lr){7-8}
+
+		& & Before & After & Before & After
+		& Before & After \\
+
+		\midrule
+
+
+		\multirow{4}{*}{EuroSAT-MS}
+		& TerraMind-L & 79.8 & 96.6 & 92.1 & 99.6 & 0.050 & 0.330 \\
+		& DOFA ViT-L/16 & 84.5 & 98.7 & 95.5 & 99.4 & 0.095 & 0.596 \\
+		& SSL4EO ViT-L/16 & 74.8 & 96.7 & 89.6 & 99.7 & 0.005 & 0.339 \\
+		& MobileNet (Sup.) & 61.4 & 96.6 & 80.1 & 98.8 & -0.100 & 0.549 \\
+
+		\midrule
+
+
+		\multirow{4}{*}{m-So2Sat}
+		& TerraMind-L & 34.4 & 53.8 & 54.6 & 73.0 & -0.010 & 0.066 \\
+		& DOFA ViT-L/16 & 52.0 & 59.9 & 73.8 & 77.1 & 0.080 & 0.131 \\
+		& SSL4EO ViT-L/16 & 30.6 & 52.2 & 47.8 & 75.1 & -0.208 & 0.077 \\
+		& MobileNet (Sup.) & 26.5 & 50.1 & 40.6 & 71.4 & -0.206 & 0.055 \\
+
+		\midrule
+
+
+		\multirow{4}{*}{TreeSatAI}
+		& TerraMind-L & 37.8 & 57.4 & 52.7 & 71.9 & -0.181 & 0.005 \\
+		& DOFA ViT-L/16 & 37.9 & 56.2 & 51.2 & 71.8 & -0.139 & 0.028 \\
+		& SSL4EO ViT-L/16 & 35.1 & 56.9 & 47.8 & 69.2 & -0.403 & 0.021 \\
+		& MobileNet (Sup.) & 34.0 & 51.4 & 47.8 & 64.8 & -0.240 & -0.020 \\
+
+		\bottomrule
+	\end{tabular*}
+
+	\vspace{3pt}
+	\parbox{\textwidth}{\footnotesize
+		\textit{Note:} Before and After refer to representations
+		before and after task-specific fine-tuning for teacher
+		models, and before and after supervised training for
+		MobileNet. kNN Top-1 and Top-2 are reported as
+		percentages; cosine silhouette is unitless.
+	}
+
+\end{table*}
+
+
+\begin{table}[t]
+	\centering
+	\caption{Student test accuracy (\%, mean $\pm$ standard
+		deviation) using reduced training subsets.}
+	\label{tab:subset_results}
+
+	\scriptsize
+	\setlength{\tabcolsep}{2pt}
+	\renewcommand{\arraystretch}{1.15}
+
+	\resizebox{\columnwidth}{!}{%
+		\begin{tabular}{llcccc}
+			\toprule
+
+			\multirow{2}{*}{Dataset}        &
+			\multirow{2}{*}{Teacher}        &
+			\multicolumn{2}{c}{50\% Subset} &
+			\multicolumn{2}{c}{10\% Subset}                                                                                       \\
+
+			\cmidrule(lr){3-4}
+			\cmidrule(lr){5-6}
+
+			                                &                                 & KD ($\alpha=0$) & No KD & KD ($\alpha=0$) & No KD \\
+			\midrule
+
+
+			\multirow{3}{*}{-}
+			                                & -
+			                                & 94.5 $\pm$ 0.0
+			                                & \multirow{3}{*}{94.8 $\pm$ 0.1}
+			                                & 83.4 $\pm$ 1.0
+			                                & \multirow{3}{*}{83.9 $\pm$ 1.1}                                                     \\
+
+			                                & -
+			                                & 94.0 $\pm$ 0.8
+			                                &
+			                                & 84.6 $\pm$ 0.9
+			                                &                                                                                     \\
+
+			                                & -
+			                                & 94.6 $\pm$ 0.1
+			                                &
+			                                & 83.0 $\pm$ 1.3
+			                                &                                                                                     \\
+
+			\midrule
+
+			\multirow{3}{*}{-}
+			                                & -
+			                                & 44.5 $\pm$ 0.6
+			                                & \multirow{3}{*}{43.4 $\pm$ 0.3}
+			                                & 33.7 $\pm$ 1.8
+			                                & \multirow{3}{*}{33.9 $\pm$ 2.0}                                                     \\
+
+			                                & -
+			                                & 44.6 $\pm$ 1.4
+			                                &
+			                                & 34.7 $\pm$ 2.0
+			                                &                                                                                     \\
+
+			                                & -
+			                                & 43.1 $\pm$ 1.1
+			                                &
+			                                & 33.0 $\pm$ 2.4
+			                                &                                                                                     \\
+
+			\midrule
+
+			\multirow{3}{*}{-}
+			                                & -
+			                                & 43.8 $\pm$ 3.2
+			                                & \multirow{3}{*}{44.8 $\pm$ 0.7}
+			                                & 35.4 $\pm$ 2.3
+			                                & \multirow{3}{*}{35.5 $\pm$ 2.1}                                                     \\
+
+			                                & -
+			                                & 43.3 $\pm$ 1.5
+			                                &
+			                                & 35.0 $\pm$ 2.5
+			                                &                                                                                     \\
+
+			                                & -
+			                                & 46.9 $\pm$ 1.4
+			                                &
+			                                & 37.4 $\pm$ 1.8
+			                                &                                                                                     \\
+
+
+			\bottomrule
+		\end{tabular}%
+	}
+
+	\vspace{2pt}
+	\parbox{\columnwidth}{\scriptsize
+		\textit{Note:} Results are reported as mean
+		$\pm$ standard deviation. KD denotes knowledge
+		distillation; No KD denotes supervised training.
+	}
+
+\end{table}
+
+
+
+CAPACITY
+\begin{table}[t]
+	\centering
+	\caption{Test accuracy (\%) of teacher models and
+		knowledge-distilled students trained using the full dataset.}
+	\label{tab:kd_per_teacher}
+	\setlength{\tabcolsep}{4pt}
+	\renewcommand{\arraystretch}{1.15}
+	\begin{tabular}{llccc}
+		\toprule
+		\multirow{2}{*}{Dataset}           &
+		\multirow{2}{*}{Teacher}           &
+		\multirow{2}{*}{Teacher Acc. (\%)} &
+		\multicolumn{2}{c}{Student Accuracy (\%)}                            \\
+		\cmidrule(lr){4-5}
+		                                   &               &      &
+		KD ($\alpha=0$)                    &
+		KD (coreset)                                                         \\
+		\midrule
+
+		\multirow{3}{*}{EuroSAT}
+		                                   & SSL4EO-L      & 98.3 & 96.3 & - \\
+		                                   & SSL4EO-B      & 98.2 & -    & - \\
+		                                   & SpectralGPT-B & 98.1 & -    & - \\
+
+		\midrule
+
+		\multirow{3}{*}{So2Sat}
+		                                   & SSL4EO-L      & 58.9 & 56.0 & - \\
+		                                   & SSL4EO-B      & 53.4 & -    & - \\
+		                                   & SpectralGPT-B & 48.8 & -    & - \\
+
+		\midrule
+
+		\multirow{3}{*}{TreeSatAI}
+		                                   & SSL4EO-L      & 56.8 & 52.6 & - \\
+		                                   & SSL4EO-B      & 55.2 & 48.6 & - \\
+		                                   & SpectralGPT-B & 54.8 & 50.5 & - \\
+
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+
+\begin{table}[t]
+	\centering
+	\caption{Characteristics of three remote sensing datasets.}
+	\label{tab:dataset_characteristics}
+	\setlength{\tabcolsep}{4pt}
+	\renewcommand{\arraystretch}{1.15}
+	\begin{tabular}{lccc}
+		\hline
+		\textbf{Dataset}   &
+		\textbf{Classes}   &
+		\textbf{Imbalance} &
+		\textbf{Separability}                    \\
+		\hline
+		EuroSAT-MS         & 10 & 0.000 & 0.064  \\
+		So2Sat             & 17 & 0.003 & -0.059 \\
+		TreeSatAI          & 20 & 0.102 & -0.144 \\
+		\hline
+	\end{tabular}
+
+	\vspace{2pt}
+	\parbox{\columnwidth}{\footnotesize
+		\textit{Note:} \textbf{Classes}: number of labels. \textbf{Imbalance}: class distribution unevenness. \textbf{Separability}: pretrained TerraMind feature separation. Lower imbalance and higher separability are preferred.
+	}
+\end{table}
