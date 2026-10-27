@@ -13,11 +13,12 @@
 \usepackage{multirow}
 \usepackage{makecell}
 \usepackage{adjustbox}
+\usepackage[hidelinks]{hyperref}
 \def\BibTeX{{\rm B\kern-.05em{\sc i\kern-.025em b}\kern-.08em
     T\kern-.1667em\lower.7ex\hbox{E}\kern-.125emX}}
 \begin{document}
 
-\title{Learning with Less Data: Understanding Performance in Knowledge Distillation\\
+\title{Distilling Knowledge with Less Data in Remote Sensing \\ %Learning with Less Data: Understanding Performance in Knowledge Distillation\\
 }
 
 %https://efficientaiworkshop.github.io/
@@ -33,7 +34,7 @@
 	\IEEEauthorblockA{
 		\IEEEauthorrefmark{1}
 		Technische Universität Berlin, Berlin, Germany\\
-		\{diellza.sherifi,irion,odej.kao\}@tu-berlin.de
+		\{diellza.sherifi, irion, odej.kao\}@tu-berlin.de
 	}
 
 	\IEEEauthorblockA{
@@ -48,9 +49,9 @@
 \begin{abstract}
 	Data used in remote sensing (RS) applications can be heterogeneous in terms of modalities, spatial resolution, and temporal resolution.
 	This influences how models pretrained on natural images learn their data feature space. Many RS datasets can be challenging to learn, even for large geospatial foundation models (GeoFMs), and the use of such models can increase computational demands.
-	Knowledge distillation (KD) reduces some of the burden by transferring knowledge from high-capacity models to smaller, more efficient student models, while coreset selection aims to reduce training costs by selecting smaller, representative subsets of the training data.
-	Therefore, we investigate how RS datasets that pose different challenges to different GeoFMs influence KD effectiveness and whether comparable performance can be achieved using only a subset of the data.
-	At 75× reduction in model parameter count with training subsets as small as 10\% of the full dataset, our results show that higher teacher accuracy does not necessarily translate into better student performance.
+	Knowledge distillation (KD) reduces some of the burden by transferring knowledge from high-capacity to more efficient student models, while coreset selection aims to reduce training costs by selecting smaller, representative subsets of the training data.
+	In this work, we combine these principles and investigate how RS datasets that pose different challenges to different GeoFMs influence KD effectiveness and whether comparable performance can be achieved using only a subset of the data.
+	%At 99\% reduction in model parameter count with training subsets as small as 10\% of the full dataset, our results show that higher teacher accuracy does not necessarily translate into better student performance.
 
 \end{abstract}
 
@@ -80,41 +81,41 @@ This is particularly relevant in RS applications, where datasets can contain lar
 At the dataset level, coreset selection provides a way to lower the burden by selecting a smaller subset of the dataset.
 %that preserves the most relevant information for the task.
 Specifically, reducing training data, training time, and training memory~\cite{hashim2026coreset}.
-The overall goal of coreset selection is to preserve the most relevant information for the task by capturing the distribution of the complete dataset through a smaller subset~\cite{hashim2026coreset,moser2025coreset}.
+The overall goal of coreset selection is to preserve the most relevant information for the task by capturing the distribution of the full training dataset through a smaller subset~\cite{hashim2026coreset,moser2025coreset}.
 %The key difference between selection methods is the signal of selecting the subset~\cite{moser2025coreset}.
 Across the literature on coreset selection, evaluations of the proposed methods have largely relied on established benchmark datasets, including natural image datasets such as CIFAR and ImageNet~\cite{moser2025coreset, mohanty2026enhancing, ben2024distilling}.
 In the remote sensing domain, model-agnostic coreset selection approaches have also been explored, highlighting the importance of selecting high-quality and representative samples for effective training~\cite{nogueira2026core}.
 %Model-agnostic coreset selection for remote sensing segmentation tasks emphasizes the importance of selecting high-quality and representative samples~\cite{nogueira2026core}.
 
 This motivates investigating how remote sensing data characteristics, particularly semantic complexity, class distribution, and feature separability, influence data-efficient learning across tasks, ranging from those that reach high performance to those that remain more challenging to learn.
-As summarized in Fig.~\ref{fig:figure1}, our observations across three remote sensing datasets using the same Sentinel-2 sensor modality and Geospatial Foundation Model (TerraMind) reveal differences in these characteristics and their learning behavior.
+As summarized in Fig.~\ref{fig:figure1}, our observations across three RS datasets using the same Sentinel-2 sensor modality and a Geospatial Foundation Model (TerraMind) reveal differences in these characteristics and their zero-shot feature separability.
 In terms of semantic granularity, EuroSat contains relatively broad land-cover categories (coarse-grained), whereas So2Sat and TreeSatAI include more detailed class distinctions (fine-grained).
 
-Therefore, we connect coreset selection and knowledge distillation in remote sensing by investigating how training data interact with the large capacity gap between teachers and the student model during knowledge transfer.
-To this end, we analyze whether a smaller student model can retain sufficient task knowledge when trained only on a selected subset of the available data and how data characteristics contribute to the performance.
+Therefore, we connect coreset selection and knowledge distillation in remote sensing by investigating how training on selected data subsets interacts with the large capacity gap between teachers and the student model during knowledge transfer.
+To this end, we analyze whether a smaller student model can retain sufficient task knowledge when trained only on a selected subset of the available data and how data characteristics could contribute to the performance.
 %To this end, we compare knowledge distillation outcomes across equally sized subsets and analyze which data characteristics contribute to differences in student performance.
 %We examine how data characteristics such as semantic separability, class distribution, and sample heterogeneity contribute to differences in difficulty across remote sensing datasets, ranging from tasks that saturate quickly to those that remain more challenging to learn.
 
 
 \section{Related Work}
 A common focus in the literature is finding which method performs best for a given coreset selection setting.
-For example, Nogueira et al.~\cite{nogueira2026core} compare image-based, label-based, and hybrid coreset selection methods for remote sensing segmentation, showing that carefully selected subsets can outperform random sampling.
+For example, Nogueira et al.~\cite{nogueira2026core} compare image-based, label-based, and hybrid coreset selection methods for remote sensing segmentation, showing that carefully selected subsets can outperform random data selection.
 Similarly, Hashim et al.~\cite{hashim2026coreset} compare clustering-based and gradient-based methods with a focus on computational efficiency.
 They propose K-CREST by combining both signals to preserve data diversity and training information during fine-tuning on remote sensing data.
 %Xiao et al. address the limitations of both pruning and dataset distillation by combining pruning, sample aggregation, and constrained augmentation to compress datasets using only hard labels.
 Guo et al.~\cite{guo2022deepcore} evaluate established coreset selection methods for deep learning models on natural images, showing that their effectiveness depends across experimental settings.
-Zhang et al.~\cite{zhang2023comparing} compare grouping-based, entropy-based, and direct sample selection methods across three remote sensing datasets for classification tasks.
+Zhang et al.~\cite{zhang2023comparing} compare grouping-based, entropy-based, and direct coreset selection methods across three remote sensing datasets for classification tasks.
 Their findings suggest that selecting representative samples based on pixel-value histograms achieves higher classification performance.
 
-In a complementary direction for learning with reduced data, Xu et al.~\cite{xu2026towards} explore a remote sensing dataset distillation by generating a compact synthetic training set for deep learning models.
+In a complementary direction for learning with reduced training data, Xu et al.~\cite{xu2026towards} explore a remote sensing dataset distillation by generating a compact synthetic training set for deep learning models.
 Similarly, Frank et al.~\cite{frank2025makes} investigate synthetic surrogate datasets as an alternative to the original training data. Their focus is on knowledge distillation, where they identify key data characteristics that enable effective knowledge transfer from teacher to student.
-Ben-Baruch et al.~\cite{ben2024distilling} then study knowledge distillation on pruned datasets, using teacher-generated soft predictions to guide student training after data reduction.
-Focusing on teacher guidance for the selection of the coreset, Mohanty et al.~\cite{mohanty2026enhancing} propose using teacher-generated soft labels as a signal for existing selection methods.
+Ben-Baruch et al.~\cite{ben2024distilling} then study knowledge distillation on selected training subsets, using teacher-generated soft predictions to guide student learning.
+Focusing on teacher-guided coreset selection, Mohanty et al.~\cite{mohanty2026enhancing} propose using teacher-generated soft labels as a signal for existing selection methods.
 These soft labels provide additional information about sample confidence and class relationships, leading to more informative subsets.
-Dey et al.~\cite{dey2026rethinking} compare several dataset-distillation methods and find out that high-quality coresets do not consistently outperform random subsets under soft-label supervision, whereas the quality of coreset selection has a greater impact under hard-label supervision.
+Dey et al.~\cite{dey2026rethinking} compare several dataset-distillation methods and find out that high-quality coresets do not consistently outperform randomly selected subsets under soft-label supervision, whereas the quality of coreset selection has a greater impact under hard-label supervision.
 
-While the existing coreset selection methods have explored data-efficient fine-tuning and, in combination with knowledge distillation, our goal is to investigate whether selected subsets remain effective for knowledge distillation in domain-specific settings such as remote sensing.
-Specifically, we evaluate this across datasets ranging from lower learning difficulty to more challenging tasks and analyze the factors that influence distillation performance.
+While the existing coreset selection methods have explored data-efficient fine-tuning and, in combination with knowledge distillation, our goal is to investigate whether selected training subsets remain effective for knowledge distillation in domain-specific settings such as remote sensing.
+Specifically, we evaluate this across datasets ranging from those where models achieve high performance to those that remain more challenging, and analyze the factors that influence the distillation performance.
 
 %They apply knowledge distillation after data pruning, using a teacher trained on the full dataset to guide student learning on the reduced subset. The study is primarily evaluated on natural image classification datasets. Their study is limited to natural image classification and does not investigate whether the selected subsets are also effective for knowledge distillation or in domain-specific settings such as remote sensing.
 
@@ -135,26 +136,26 @@ Specifically, we evaluate this across datasets ranging from lower learning diffi
 %This also focuses on image quality and propose using soft labels instead of hard labels. it is more for distillation data.
 %https://arxiv.org/pdf/2502.06434?
 
-\section{Experimental Setup}
-We fix the sensor (Sentinel-2) and the student, and vary the teacher, the task difficulty, and how training samples are selected.
-The datasets range from coarse, well-separated land-cover classes (EuroSAT~\cite{helber2019eurosat}, 10 classes) to fine-grained local climate zones (So2Sat~\cite{Zhu2020So2Sat}, 17) and imbalanced tree species (TreeSatAI~\cite{Ahlswede2023}, 20).
+\section{Experimental Methodology}
+We fix the input modality (Sentinel-2) and the student, and vary the teacher, the task difficulty, and how training subsets are selected.
+The datasets range from coarse, well-separated land-cover classes (EuroSAT~\cite{helber2019eurosat}, 10 classes) to fine-grained local climate zones (So2Sat~\cite{Zhu2020So2Sat}, 17 classes) and imbalanced tree species (TreeSatAI~\cite{Ahlswede2023}, 20 classes).
+All experiments use the PANGAEA framework\footnote{\url{https://github.com/VMarsocci/pangaea-bench}} for data loading, preprocessing, teacher fine-tuning, and evaluation.
 
-\textbf{Teachers.} All three teachers have ViT-L-sized encoders (305--337M parameters), so differences between distilled students reflect the pretraining strategy.
+
+\textbf{Models.} All three teachers have ViT-L-sized encoders (305--337M parameters), so differences between distilled students reflect the pretraining strategy.
 SSL4EO-S12~\cite{wang2023ssl4eo} is an MAE pretrained only on 13-band Sentinel-2 L1C imagery, the sensor of all three datasets.
 DOFA~\cite{xiong2024neural} does not have a specific sensor modality and accepts arbitrary band sets, from SAR to hyperspectral.
 TerraMind~\cite{jakubik2025terramind} is pretrained across S1, S2, DEM, NDVI, LULC, geolocation, and text.
 We provide only Sentinel-2 inputs to isolate the pretraining and model architecture.
+To isolate the performance gains of the knowledge transferred from the teacher, we use a randomly initialized MobileNet-v3-Large~\cite{9008835} (2.75M parameters), which also introduces a large capacity and architecture gap.
 
-\textbf{Student.} A randomly initialized MobileNet-v3-Large~\cite{9008835} (2.75M parameters) introduces a large capacity and architecture gap.
-Without pretraining, any gain over supervised training must come from the teacher.
-
-\textbf{Knowledge distillation.} We use logit-based KD only, with no feature-level loss and $T=8$ to soften teacher probabilities and expose relative non-top-class preferences.
-With soft targets alone ($\alpha=0$), ground-truth labels provide no training-loss signal, testing what teacher outputs can transfer; $\alpha=0.5$ adds hard-label cross-entropy with equal weight.
+\textbf{Knowledge distillation.} We use logit-based KD, with no feature-level loss and $T=8$ to soften teacher probabilities and expose relative non-top-class preferences.
+With soft targets alone ($\alpha=0$), ground-truth labels provide no training-loss signal, testing what teacher outputs can transfer. $\alpha=0.5$ adds hard-label cross-entropy with equal weight.
 Inputs are resized to $224\times224$, band-selected, normalized, and padded, without augmentation.
-Students train for 50 epochs (batch size 8, AdamW, $lr=10^{-4}$, weight decay 0.05, decayed to $10^{-5}$ and $10^{-6}$ at 60\% and 90\% of iterations) with seed 234 and deterministic cuDNN; the best validation checkpoint is tested.
+Students train for 50 epochs (batch size 8, AdamW, $lr=10^{-4}$, weight decay 0.05, decayed to $10^{-5}$ and $10^{-6}$ at 60\% and 90\% of iterations) with seed 234 and deterministic cuDNN. The best validation checkpoint is tested.
 
-\textbf{Coreset selection.} We select teacher-specific, class-stratified 10\% subsets and distill from the same teacher ($T=8$, $\alpha=0$).
-Cosine silhouette selection uses the teacher's feature space and keeps, per class, samples with high cosine silhouette, i.e., close to their own class and far from the nearest other class.
+\textbf{Coreset selection.} We use teacher-guided, class-stratified 10\% subsets based on feature separability and prediction diversity, and distill from the same teacher ($T=8$, $\alpha=0$).
+Cosine silhouette selection uses the teacher's feature space and keeps per class, samples with high cosine silhouette, i.e., close to their own class and far from the nearest other class.
 Soft-output prototype selection uses the teacher's softened outputs, the signal the student learns from: k-means on $\operatorname{softmax}(\ell/8)$ per class, with 10\% as many clusters as images, keeps the image nearest each centroid, representing teacher prediction patterns.
 
 %%%%%%% OLD EXPERIMENTAL SETUP %%%%%
@@ -524,13 +525,11 @@ We also do not consider teacher--student similar architecture pair and differenc
 Remote sensing data and tasks differ in characteristics, bands, and sensor modality, while GeoFMs vary in their pretraining strategy and architecture setting.
 Our findings show that knowledge distillation to a smaller student could work with less data, but performance varies substantially across datasets and teacher settings.
 We study whether this variation is explained by subset composition, teacher-derived signals, and initialization, and identify which factors make limited-data KD more reliable.
-
 Strong teacher performance from a high-capacity model does not necessarily translate into effective knowledge to transfer.
 Furthermore, randomly reducing the training data size for the student further reduces performance.
 Selecting samples with highly separable features does not consistently improve knowledge distillation under limited data.
 In contrast, soft-output diversity-based selection achieves comparable performance in some settings and improvements in others.
 These findings highlight the importance of considering dataset characteristics and training data selection when applying data-efficient knowledge distillation.
-
 Future work could extend the evaluation to additional remote sensing datasets and tasks, explore different sizes of student architectures with remote sensing pretraining, and investigate whether additional teacher-guided coreset selection strategies can reach similar performance to the teacher.
 
 \section{Acknowledgment}
